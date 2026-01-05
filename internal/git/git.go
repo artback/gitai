@@ -213,14 +213,14 @@ func (s *Service) GetFilesInLastCommit() ([]string, error) {
 		// "Selecting" it in the UI usually means "Add to index".
 		// If we select a file that is currently deleted in WorkingTree (and was deleted in HEAD),
 		// `worktree.Add` might behave as expected (keep it deleted).
-		
+
 		var name string
 		if change.To.Name != "" {
 			name = change.To.Name
 		} else if change.From.Name != "" {
 			name = change.From.Name
 		}
-		
+
 		if name != "" {
 			files = append(files, name)
 		}
@@ -271,7 +271,7 @@ func (s *Service) GetAmendChangesForFiles(files []string) (string, error) {
 	if err == nil {
 		_ = headTree.Files().ForEach(func(f *object.File) error {
 			// We need the full path relative to repo root. f.Name is relative to tree (root).
-			// Our 'files' arg is usually relative to cwd or repo root? 
+			// Our 'files' arg is usually relative to cwd or repo root?
 			// internal/tui calls usually pass paths that ResolvePath returns, which are relative to Repo Root.
 			filesMap[f.Name] = true
 			return nil
@@ -324,7 +324,7 @@ func (s *Service) GetAmendChangesForFiles(files []string) (string, error) {
 		if isNew && isDeleted {
 			continue
 		}
-		
+
 		// Optimization: if content matches, skip (no diff)
 		if oldText == newText && !isNew && !isDeleted {
 			continue
@@ -488,7 +488,7 @@ func (s *Service) Push(ctx context.Context, remoteName string) (string, error) {
 	return "Push successful", nil
 }
 
-// PushForce pushes the current branch to the specified remote with --force.
+// PushForce pushes the current branch to the specified remote with --force using the system git command.
 func (s *Service) PushForce(ctx context.Context, remoteName string) (string, error) {
 	repo, _, _, err := getRepo()
 	if err != nil {
@@ -517,6 +517,7 @@ func (s *Service) PushForce(ctx context.Context, remoteName string) (string, err
 		}
 		return "", fmt.Errorf("failed to force push: %w", err)
 	}
+
 	return "Force Push successful", nil
 }
 
