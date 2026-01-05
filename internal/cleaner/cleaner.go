@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	badBullets = []string{"* ", "• ", "- ", ". "}
+	bullets = []string{"* ", "• ", "- ", ". "}
 )
 
 // MessageCleaner defines a function signature for a transformation step
@@ -69,7 +69,7 @@ func normalizeBullets(bullet string) MessageCleaner {
 		lines := strings.Split(text, "\n")
 		for i, line := range lines {
 			trimmed := strings.TrimSpace(line)
-			for _, bb := range badBullets {
+			for _, bb := range bullets {
 				if content, found := strings.CutPrefix(trimmed, bb); found {
 					lines[i] = fmt.Sprintf("%s %s", bullet, content)
 					break
