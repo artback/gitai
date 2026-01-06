@@ -478,7 +478,10 @@ func (s *Service) Push(ctx context.Context, remoteName string) (string, error) {
 
 	auth := resolveAuth(urls[0])
 
-	err = repo.PushContext(ctx, &git.PushOptions{Auth: auth})
+	err = repo.PushContext(ctx, &git.PushOptions{
+		RemoteName: remoteName,
+		Auth:       auth,
+	})
 	if err != nil {
 		if errors.Is(err, git.NoErrAlreadyUpToDate) {
 			return "Already up-to-date", nil
@@ -508,8 +511,9 @@ func (s *Service) PushForce(ctx context.Context, remoteName string) (string, err
 	auth := resolveAuth(urls[0])
 
 	err = repo.PushContext(ctx, &git.PushOptions{
-		Auth:  auth,
-		Force: true,
+		RemoteName: remoteName,
+		Auth:       auth,
+		Force:      true,
 	})
 	if err != nil {
 		if errors.Is(err, git.NoErrAlreadyUpToDate) {
