@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -485,66 +484,7 @@ func resolveAuth(urlStr string) transport.AuthMethod {
 	return auth
 }
 
-// ExtractVersionFromDiff scans a unified diff for lines that look like version updates.
-func ExtractVersionFromDiff(diffText string) string {
-	lines := strings.Split(diffText, "\n")
-	versionRegex := regexp.MustCompile(`([0-9]+\.[0-9][0-9a-z.-]*)`)
-
-	var oldVersion, newVersion string
-	var currentFile string
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "diff --git") {
-			if parts := strings.Fields(line); len(parts) >= 4 {
-				currentFile = filepath.Base(parts[3])
-			}
-			continue
-		}
-
-		if !isVersionFile(currentFile) {
-			continue
-		}
-
-		lowerLine := strings.ToLower(line)
-		if strings.Contains(lowerLine, "version") && !strings.Contains(lowerLine, "versioning") {
-			if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-				if matches := versionRegex.FindStringSubmatch(line[1:]); len(matches) > 1 {
-					oldVersion = matches[1]
-				}
-			}
-			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-				if matches := versionRegex.FindStringSubmatch(line[1:]); len(matches) > 1 {
-					newVersion = matches[1]
-				}
-			}
-		}
-
-		if oldVersion != "" && newVersion != "" && oldVersion != newVersion {
-			return fmt.Sprintf("%s -> %s", oldVersion, newVersion)
-		}
-	}
-	return newVersion
-}
-
 // --- Utility Helpers ---
-
-func isVersionFile(filename string) bool {
-	f := strings.ToLower(filename)
-	if strings.Contains(f, "test") || strings.Contains(f, "_spec") {
-		return false
-	}
-	targets := []string{
-		"version", "package.json", "go.mod", "cargo.toml", "pyproject.toml",
-		"composer.json", "gemfile", "mix.exs", "version.rb", "version.py",
-		"setup.py", "cmakelists.txt",
-	}
-	for _, t := range targets {
-		if strings.EqualFold(f, t) {
-			return true
-		}
-	}
-	return false
-}
 
 func getRepo() (*git.Repository, *git.Worktree, string, error) {
 	root, err := GetGitRoot()
