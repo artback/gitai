@@ -446,7 +446,14 @@ func getNameEmail(c *gitconfig.Config) (string, string) {
 }
 
 func resolveAuth(urlStr string) transport.AuthMethod {
+	// 1. Explicitly ignore HTTP(S)
 	if strings.HasPrefix(urlStr, "http") {
+		return nil
+	}
+
+	// 2. Only proceed if it looks like SSH (contains @ or ssh://)
+	// This prevents local paths like "/tmp/repo" from being treated as SSH
+	if !strings.Contains(urlStr, "@") && !strings.HasPrefix(urlStr, "ssh://") {
 		return nil
 	}
 
@@ -459,6 +466,7 @@ func resolveAuth(urlStr string) transport.AuthMethod {
 		User: user,
 		Callback: func() ([]ssh.Signer, error) {
 			var signers []ssh.Signer
+			// SSH Agent
 			if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 				if conn, err := (&net.Dialer{}).Dial("unix", sock); err == nil {
 					s, _ := agent.NewClient(conn).Signers()
@@ -469,6 +477,7 @@ func resolveAuth(urlStr string) transport.AuthMethod {
 				return signers, nil
 			}
 
+			// Disk Keys
 			home, _ := os.UserHomeDir()
 			for _, n := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {
 				if key, err := os.ReadFile(filepath.Join(home, ".ssh", n)); err == nil {
@@ -534,25 +543,27 @@ func generateDiffString(path, oldText, newText string, isNew, isDel bool) (resul
 			result = fmt.Sprintf("diff --git a/%s b/%s\n(Diff failed: %v)\n", path, path, r)
 		}
 	}()
-
 	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(oldText, newText, false)
+
+	a, b, c := dmp.DiffLinesToChars(oldText, newText)
+	diffs := dmp.DiffMain(a, b, false)
+	diffs = dmp.DiffCharsToLines(diffs, c)
 	dmp.DiffCleanupSemantic(diffs)
 
-	patches := dmp.PatchMake(oldText, newText)
+	patches := dmp.PatchMake(diffs)
 	decoded, _ := url.PathUnescape(dmp.PatchToText(patches))
 
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", path, path))
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", path, path))
 	if isNew {
-		b.WriteString(fmt.Sprintf("new file mode 100644\n--- /dev/null\n+++ b/%s\n", path))
+		sb.WriteString(fmt.Sprintf("new file mode 100644\n--- /dev/null\n+++ b/%s\n", path))
 	} else if isDel {
-		b.WriteString(fmt.Sprintf("deleted file mode 100644\n--- a/%s\n+++ /dev/null\n", path))
+		sb.WriteString(fmt.Sprintf("deleted file mode 100644\n--- a/%s\n+++ /dev/null\n", path))
 	} else {
-		b.WriteString(fmt.Sprintf("--- a/%s\n+++ b/%s\n", path, path))
+		sb.WriteString(fmt.Sprintf("--- a/%s\n+++ b/%s\n", path, path))
 	}
-	b.WriteString(decoded)
-	return b.String()
+	sb.WriteString(decoded)
+	return sb.String()
 }
 
 func (s *Service) GetPullRequestURL(remoteName string) (string, error) {
