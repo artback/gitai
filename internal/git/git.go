@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/url"
 	"os"
@@ -24,6 +23,12 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
+// Constants for safety and consistency
+const (
+	MaxDiffSize     = 500 * 1024 // 500 KB limit for diff generation
+	BinaryScanLimit = 8000       // Bytes to scan for null-byte binary detection
+)
+
 // ErrOutsideRepo is returned when a provided path is not within the git repository.
 var ErrOutsideRepo = errors.New("path is outside the repository")
 
@@ -35,21 +40,31 @@ func NewService() *Service {
 	return &Service{}
 }
 
+// repoContext holds state for a single operation to avoid redundant disk I/O
+type repoContext struct {
+	repo     *git.Repository
+	worktree *git.Worktree
+	root     string
+	head     *object.Commit // Nil if initial commit
+}
+
+// --- Public API Methods ---
+
 // GetStatusForFiles returns the porcelain status of the specified files.
 func (s *Service) GetStatusForFiles(files []string) (string, error) {
-	_, worktree, _, err := getRepo()
+	ctx, err := s.getRepoContext()
 	if err != nil {
-		return "", fmt.Errorf("failed to open repository: %w", err)
+		return "", err
 	}
 
-	status, err := worktree.Status()
+	status, err := ctx.worktree.Status()
 	if err != nil {
 		return "", fmt.Errorf("failed to get status: %w", err)
 	}
 
 	var builder strings.Builder
 	for _, file := range files {
-		if rel, err := toRel(file); err == nil {
+		if rel, err := s.toRel(file, ctx.root); err == nil {
 			if st, ok := status[rel]; ok {
 				builder.WriteString(fmt.Sprintf("%c%c %s\n", formatStatusCode(st.Staging), formatStatusCode(st.Worktree), rel))
 			}
@@ -58,14 +73,14 @@ func (s *Service) GetStatusForFiles(files []string) (string, error) {
 	return builder.String(), nil
 }
 
-// GetChangedFiles returns a sorted list of all modified, added, or deleted files in the repository.
+// GetChangedFiles returns a sorted list of all modified, added, or deleted files.
 func (s *Service) GetChangedFiles() ([]string, error) {
-	_, worktree, _, err := getRepo()
+	ctx, err := s.getRepoContext()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open repository: %w", err)
+		return nil, err
 	}
 
-	status, err := worktree.Status()
+	status, err := ctx.worktree.Status()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get status: %w", err)
 	}
@@ -82,270 +97,54 @@ func (s *Service) GetChangedFiles() ([]string, error) {
 
 // GetChangesForFiles generates a unified diff for the specified files against the HEAD commit.
 func (s *Service) GetChangesForFiles(files []string) (string, error) {
-	repo, _, _, err := getRepo()
+	ctx, err := s.getRepoContext()
 	if err != nil {
-		return "", fmt.Errorf("failed to open repository: %w", err)
+		return "", err
 	}
 
-	headTree, _ := getHeadTree(repo)
-	var builder strings.Builder
-
-	for _, file := range files {
-		rel, err := toRel(file)
-		if err != nil {
-			continue
-		}
-
-		oldText, isNew := "", true
-		isBinary := false
-
-		if headTree != nil {
-			if f, err := headTree.File(rel); err == nil {
-				if bin, _ := f.IsBinary(); bin {
-					isBinary = true
-				}
-				if c, err := f.Contents(); err == nil {
-					oldText, isNew = c, false
-				}
-			}
-		}
-
-		newBytes, err := os.ReadFile(filepath.Clean(file))
-		newText := string(newBytes)
-		isDeleted := err != nil
-
-		if !isBinary && !isDeleted {
-			limit := 8000
-			if len(newBytes) < limit {
-				limit = len(newBytes)
-			}
-			for i := 0; i < limit; i++ {
-				if newBytes[i] == 0 {
-					isBinary = true
-					break
-				}
-			}
-		}
-
-		if isNew && isDeleted {
-			continue
-		}
-
-		if isBinary {
-			builder.WriteString(fmt.Sprintf("diff --git a/%s b/%s\nBinary files differ\n", rel, rel))
-			continue
-		}
-
-		if len(oldText) > 500*1024 || len(newText) > 500*1024 {
-			builder.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\nBinary files or large files differ\n", rel, rel, rel, rel))
-			continue
-		}
-
-		builder.WriteString(generateDiffString(rel, oldText, newText, isNew, isDeleted))
+	var headTree *object.Tree
+	if ctx.head != nil {
+		headTree, _ = ctx.head.Tree()
 	}
-	return builder.String(), nil
+
+	return s.generateBatchDiff(files, headTree, ctx.root)
 }
 
-// GetLastCommitMessage returns the message of the HEAD commit.
-func (s *Service) GetLastCommitMessage() (string, error) {
-	repo, _, _, err := getRepo()
-	if err != nil {
-		return "", fmt.Errorf("failed to open repository: %w", err)
-	}
-
-	head, err := repo.Head()
-	if err != nil {
-		return "", fmt.Errorf("failed to get HEAD: %w", err)
-	}
-
-	commitObj, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		return "", fmt.Errorf("failed to get commit object: %w", err)
-	}
-
-	return commitObj.Message, nil
-}
-
-// GetFilesInLastCommit returns a list of files changed in the HEAD commit.
-func (s *Service) GetFilesInLastCommit() ([]string, error) {
-	repo, _, _, err := getRepo()
-	if err != nil {
-		return nil, fmt.Errorf("failed to open repository: %w", err)
-	}
-
-	head, err := repo.Head()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get HEAD: %w", err)
-	}
-
-	commitObj, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get commit object: %w", err)
-	}
-
-	currentTree, err := commitObj.Tree()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tree: %w", err)
-	}
-
-	var parentTree *object.Tree
-	if commitObj.NumParents() > 0 {
-		parent, err := commitObj.Parent(0)
-		if err == nil {
-			parentTree, _ = parent.Tree()
-		}
-	}
-
-	// If no parent (initial commit), Diff returns all files as inserts.
-	// If parent exists, it returns changes.
-	changes, err := object.DiffTree(parentTree, currentTree)
-	if err != nil {
-		return nil, fmt.Errorf("failed to diff tree: %w", err)
-	}
-
-	var files []string
-	for _, change := range changes {
-		// usage of names depends on action (insert/delete/modify)
-		// For From (old) and To (new).
-		// We generally want the name of the file in the resulting commit (To),
-		// unless it was deleted (then From).
-		// But if we are amending, we probably want to know what files were involved.
-		// If a file was deleted in HEAD, and we Amend, do we want to "select" it?
-		// "Selecting" it in the UI usually means "Add to index".
-		// If we select a file that is currently deleted in WorkingTree (and was deleted in HEAD),
-		// `worktree.Add` might behave as expected (keep it deleted).
-
-		var name string
-		if change.To.Name != "" {
-			name = change.To.Name
-		} else if change.From.Name != "" {
-			name = change.From.Name
-		}
-
-		if name != "" {
-			files = append(files, name)
-		}
-	}
-
-	sort.Strings(files)
-	return files, nil
-}
-
-// GetAmendChangesForFiles generates a diff comparing HEAD~1 to the current working tree
-// for the specified files (plus files already in HEAD), simulating an --amend view.
+// GetAmendChangesForFiles generates a diff comparing HEAD~1 to the current working tree.
 func (s *Service) GetAmendChangesForFiles(files []string) (string, error) {
-	repo, _, _, err := getRepo()
+	ctx, err := s.getRepoContext()
 	if err != nil {
-		return "", fmt.Errorf("failed to open repository: %w", err)
+		return "", err
 	}
 
-	head, err := repo.Head()
-	if err != nil {
-		return "", fmt.Errorf("failed to get HEAD: %w", err)
-	}
-
-	headCommit, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		return "", fmt.Errorf("failed to get HEAD commit: %w", err)
-	}
-
-	// 1. Get the parent tree (HEAD~1)
 	var parentTree *object.Tree
-	if headCommit.NumParents() > 0 {
-		parent, err := headCommit.Parent(0)
-		if err == nil {
+	if ctx.head != nil && ctx.head.NumParents() > 0 {
+		if parent, err := ctx.head.Parent(0); err == nil {
 			parentTree, _ = parent.Tree()
 		}
 	}
-	// If no parent (initial commit), parentTree is nil, which acts as empty tree (new files).
 
-	// 2. Determine the set of files to diff.
-	// This should include files currently in HEAD (so we see what's being kept)
-	// PLUS the new files being amended in.
 	filesMap := make(map[string]bool)
 	for _, f := range files {
 		filesMap[f] = true
 	}
 
-	// Add files from HEAD to the map
-	headTree, err := headCommit.Tree()
-	if err == nil {
-		_ = headTree.Files().ForEach(func(f *object.File) error {
-			// We need the full path relative to repo root. f.Name is relative to tree (root).
-			// Our 'files' arg is usually relative to cwd or repo root?
-			// internal/tui calls usually pass paths that ResolvePath returns, which are relative to Repo Root.
-			filesMap[f.Name] = true
-			return nil
-		})
+	if ctx.head != nil {
+		if headTree, err := ctx.head.Tree(); err == nil {
+			_ = headTree.Files().ForEach(func(f *object.File) error {
+				filesMap[f.Name] = true
+				return nil
+			})
+		}
 	}
 
-	combinedFiles := make([]string, 0, len(filesMap))
+	combined := make([]string, 0, len(filesMap))
 	for f := range filesMap {
-		combinedFiles = append(combinedFiles, f)
+		combined = append(combined, f)
 	}
-	sort.Strings(combinedFiles)
+	sort.Strings(combined)
 
-	// 3. Generate Diff against Parent Tree
-	var builder strings.Builder
-	for _, file := range combinedFiles {
-		// oldText comes from Parent Tree
-		oldText, isNew := "", true
-		isBinary := false
-
-		if parentTree != nil {
-			if f, err := parentTree.File(file); err == nil {
-				if bin, _ := f.IsBinary(); bin {
-					isBinary = true
-				}
-				if c, err := f.Contents(); err == nil {
-					oldText, isNew = c, false
-				}
-			}
-		}
-
-		// newText comes from Working Tree (simulating what will be committed)
-		newBytes, err := os.ReadFile(filepath.Clean(file))
-		newText := string(newBytes)
-		isDeleted := err != nil
-
-		if !isBinary && !isDeleted {
-			// Check for binary content in new file (simple heuristic)
-			limit := 8000
-			if len(newBytes) < limit {
-				limit = len(newBytes)
-			}
-			for i := 0; i < limit; i++ {
-				if newBytes[i] == 0 {
-					isBinary = true
-					break
-				}
-			}
-		}
-
-		if isNew && isDeleted {
-			continue
-		}
-
-		// Optimization: if content matches, skip (no diff)
-		if oldText == newText && !isNew && !isDeleted {
-			continue
-		}
-
-		if isBinary {
-			builder.WriteString(fmt.Sprintf("diff --git a/%s b/%s\nBinary files differ\n", file, file))
-			continue
-		}
-
-		// Safety check: skip diff generation for large files to avoid panics in diffmatchpatch
-		if len(oldText) > 500*1024 || len(newText) > 500*1024 {
-			builder.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\nBinary files or large files differ\n", file, file, file, file))
-			continue
-		}
-
-		builder.WriteString(generateDiffString(file, oldText, newText, isNew, isDeleted))
-	}
-
-	return builder.String(), nil
+	return s.generateBatchDiff(combined, parentTree, ctx.root)
 }
 
 // Commit stages the specified files and creates a new commit.
@@ -358,52 +157,265 @@ func (s *Service) CommitAmend(files []string, message string) error {
 	return s.performCommit(files, message, true)
 }
 
-func (s *Service) performCommit(files []string, message string, amend bool) error {
-	repo, worktree, _, err := getRepo()
+// Push pushes the current branch to the specified remote.
+func (s *Service) Push(ctx context.Context, remoteName string) (string, error) {
+	return s.performPush(ctx, remoteName, false)
+}
+
+// PushForce pushes the current branch with the force flag.
+func (s *Service) PushForce(ctx context.Context, remoteName string) (string, error) {
+	return s.performPush(ctx, remoteName, true)
+}
+
+// ResolvePath returns a list of all repository files within the given path.
+func (s *Service) ResolvePath(path string) ([]string, error) {
+	ctx, err := s.getRepoContext()
 	if err != nil {
-		return fmt.Errorf("failed to open repository: %w", err)
+		return nil, err
 	}
 
-	// 1. Stage the files
-	for _, file := range files {
-		rel, err := toRel(file)
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+
+	rel, err := filepath.Rel(ctx.root, abs)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := os.Stat(abs)
+	if err != nil || !info.IsDir() {
+		if strings.HasPrefix(rel, "..") {
+			return nil, ErrOutsideRepo
+		}
+		return []string{rel}, nil
+	}
+
+	status, _ := ctx.worktree.Status()
+	headTree, _ := s.getHeadTree(ctx.repo)
+
+	prefix := rel
+	if prefix == "." {
+		prefix = ""
+	} else if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+
+	seen := make(map[string]bool)
+	var results []string
+	add := func(p string) {
+		if (prefix == "" || strings.HasPrefix(p, prefix)) && !seen[p] {
+			results = append(results, p)
+			seen[p] = true
+		}
+	}
+
+	for p := range status {
+		add(p)
+	}
+	if headTree != nil {
+		_ = headTree.Files().ForEach(func(f *object.File) error {
+			add(f.Name)
+			return nil
+		})
+	}
+
+	sort.Strings(results)
+	return results, nil
+}
+
+// GetLastCommitMessage returns the message of the HEAD commit.
+func (s *Service) GetLastCommitMessage() (string, error) {
+	ctx, err := s.getRepoContext()
+	if err != nil {
+		return "", err
+	}
+	if ctx.head == nil {
+		return "", errors.New("no commits found")
+	}
+	return ctx.head.Message, nil
+}
+
+// GetFilesInLastCommit returns a list of files changed in the HEAD commit.
+func (s *Service) GetFilesInLastCommit() ([]string, error) {
+	ctx, err := s.getRepoContext()
+	if err != nil {
+		return nil, err
+	}
+	if ctx.head == nil {
+		return nil, nil
+	}
+
+	currentTree, _ := ctx.head.Tree()
+	var parentTree *object.Tree
+	if ctx.head.NumParents() > 0 {
+		if parent, err := ctx.head.Parent(0); err == nil {
+			parentTree, _ = parent.Tree()
+		}
+	}
+
+	changes, err := object.DiffTree(parentTree, currentTree)
+	if err != nil {
+		return nil, fmt.Errorf("failed to diff tree: %w", err)
+	}
+
+	var files []string
+	for _, change := range changes {
+		name := change.To.Name
+		if name == "" {
+			name = change.From.Name
+		}
+		if name != "" {
+			files = append(files, name)
+		}
+	}
+
+	sort.Strings(files)
+	return files, nil
+}
+
+// --- Internal Engine Logic ---
+
+func (s *Service) getRepoContext() (*repoContext, error) {
+	repo, wt, root, err := getRepo()
+	if err != nil {
+		return nil, err
+	}
+	ctx := &repoContext{repo: repo, worktree: wt, root: root}
+	if head, err := repo.Head(); err == nil {
+		ctx.head, _ = repo.CommitObject(head.Hash())
+	}
+	return ctx, nil
+}
+
+func (s *Service) toRel(path, root string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", ErrOutsideRepo
+	}
+	return rel, nil
+}
+
+func (s *Service) generateBatchDiff(files []string, oldTree *object.Tree, root string) (string, error) {
+	var builder strings.Builder
+	for _, path := range files {
+		rel, err := s.toRel(path, root)
 		if err != nil {
-			return err
+			continue
 		}
-		if _, err := worktree.Add(rel); err != nil {
-			return fmt.Errorf("failed to add file %s: %w", rel, err)
+		diff, _ := s.diffFile(rel, path, oldTree)
+		builder.WriteString(diff)
+	}
+	return builder.String(), nil
+}
+
+func (s *Service) diffFile(rel, fullPath string, oldTree *object.Tree) (string, error) {
+	var oldText string
+	isNew, isBinary := true, false
+
+	if oldTree != nil {
+		if f, err := oldTree.File(rel); err == nil {
+			isBinary, _ = f.IsBinary()
+			oldText, _ = f.Contents()
+			isNew = false
 		}
 	}
 
-	sig, err := s.getAuthorSignature(repo)
+	newBytes, err := os.ReadFile(filepath.Clean(fullPath))
+	isDeleted := err != nil
+	newText := string(newBytes)
+
+	// Binary detection heuristic
+	if !isBinary && !isDeleted {
+		limit := BinaryScanLimit
+		if len(newBytes) < limit {
+			limit = len(newBytes)
+		}
+		for i := 0; i < limit; i++ {
+			if newBytes[i] == 0 {
+				isBinary = true
+				break
+			}
+		}
+	}
+
+	if (isNew && isDeleted) || (oldText == newText && !isNew && !isDeleted) {
+		return "", nil
+	}
+
+	if isBinary {
+		return fmt.Sprintf("diff --git a/%s b/%s\nBinary files differ\n", rel, rel), nil
+	}
+
+	if len(oldText) > MaxDiffSize || len(newText) > MaxDiffSize {
+		return fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\nBinary files or large files differ\n", rel, rel, rel, rel), nil
+	}
+
+	return generateDiffString(rel, oldText, newText, isNew, isDeleted), nil
+}
+
+func (s *Service) performCommit(files []string, message string, amend bool) error {
+	ctx, err := s.getRepoContext()
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		rel, _ := s.toRel(file, ctx.root)
+		if _, err := ctx.worktree.Add(rel); err != nil {
+			return fmt.Errorf("failed to add %s: %w", rel, err)
+		}
+	}
+
+	sig, err := s.getAuthorSignature(ctx.repo)
 	if err != nil {
 		return err
 	}
 
 	opts := &git.CommitOptions{Author: sig}
-
-	// 2. Handle Amending logic
-	if amend {
-		head, err := repo.Head()
-		if err != nil {
-			return fmt.Errorf("failed to get HEAD for amend: %w", err)
-		}
-		headCommit, err := repo.CommitObject(head.Hash())
-		if err != nil {
-			return fmt.Errorf("failed to get HEAD commit: %w", err)
-		}
-		// Set parents to current HEAD's parents (bypassing HEAD itself)
-		opts.Parents = headCommit.ParentHashes
+	if amend && ctx.head != nil {
+		opts.Parents = ctx.head.ParentHashes
 	}
 
-	// 3. Perform the commit
-	_, err = worktree.Commit(message, opts)
-	if err != nil {
-		return fmt.Errorf("failed to commit (amend=%v): %w", amend, err)
-	}
-
-	return nil
+	_, err = ctx.worktree.Commit(message, opts)
+	return err
 }
+
+func (s *Service) performPush(ctx context.Context, remoteName string, force bool) (string, error) {
+	rctx, err := s.getRepoContext()
+	if err != nil {
+		return "", err
+	}
+
+	localHead, _ := rctx.repo.Head()
+	remote, err := rctx.repo.Remote(remoteName)
+	if err != nil {
+		return "", err
+	}
+
+	auth := resolveAuth(remote.Config().URLs[0])
+	branchName := localHead.Name()
+	refSpec := gitconfig.RefSpec(fmt.Sprintf("%s:%s", branchName, branchName))
+
+	err = rctx.repo.PushContext(ctx, &git.PushOptions{
+		RemoteName: remoteName,
+		Auth:       auth,
+		RefSpecs:   []gitconfig.RefSpec{refSpec},
+		Force:      force,
+	})
+
+	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return "", fmt.Errorf("push failed: %w", err)
+	}
+	return "Push successful", nil
+}
+
+// --- Auth & Signature Helpers ---
 
 func (s *Service) getAuthorSignature(r *git.Repository) (*object.Signature, error) {
 	cfg, _ := r.Config()
@@ -421,14 +433,10 @@ func (s *Service) getAuthorSignature(r *git.Repository) (*object.Signature, erro
 	}
 
 	if name == "" || email == "" {
-		return nil, errors.New("git user name or email not found in local or global config")
+		return nil, errors.New("git user config not found")
 	}
 
-	return &object.Signature{
-		Name:  name,
-		Email: email,
-		When:  time.Now(),
-	}, nil
+	return &object.Signature{Name: name, Email: email, When: time.Now()}, nil
 }
 
 func getNameEmail(c *gitconfig.Config) (string, string) {
@@ -438,127 +446,48 @@ func getNameEmail(c *gitconfig.Config) (string, string) {
 	return c.User.Name, c.User.Email
 }
 
-// Push pushes the current branch to the specified remote.
-func (s *Service) Push(ctx context.Context, remoteName string) (string, error) {
-	return s.performPush(ctx, remoteName, false)
-}
-
-// PushForce pushes the current branch to the specified remote with the force flag.
-func (s *Service) PushForce(ctx context.Context, remoteName string) (string, error) {
-	return s.performPush(ctx, remoteName, true)
-}
-
-// performPush contains the shared logic for both standard and force pushes.
-func (s *Service) performPush(ctx context.Context, remoteName string, force bool) (string, error) {
-	repo, _, _, err := getRepo()
-	if err != nil {
-		return "", fmt.Errorf("failed to open repository: %w", err)
+func resolveAuth(urlStr string) transport.AuthMethod {
+	if strings.HasPrefix(urlStr, "http") {
+		return nil
 	}
 
-	// DEBUG: Current Local HEAD
-	localHead, _ := repo.Head()
-	log.Printf("[DEBUG] Local HEAD before push: %s (%s)", localHead.Name(), localHead.Hash())
-
-	remote, err := repo.Remote(remoteName)
-	if err != nil {
-		return "", fmt.Errorf("remote '%s' not found: %w", remoteName, err)
+	user := "git"
+	if parts := strings.Split(urlStr, "@"); len(parts) > 1 {
+		user = strings.TrimPrefix(parts[0], "ssh://")
 	}
 
-	auth := resolveAuth(remote.Config().URLs[0])
-	branchName := localHead.Name()
-	refSpec := gitconfig.RefSpec(fmt.Sprintf("%s:%s", branchName, branchName))
+	auth := &gitssh.PublicKeysCallback{
+		User: user,
+		Callback: func() ([]ssh.Signer, error) {
+			var signers []ssh.Signer
+			if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
+				if conn, err := (&net.Dialer{}).Dial("unix", sock); err == nil {
+					s, _ := agent.NewClient(conn).Signers()
+					signers = append(signers, s...)
+				}
+			}
+			if len(signers) > 0 {
+				return signers, nil
+			}
 
-	log.Printf("[DEBUG] Attempting push to %s with RefSpec: %s (Force: %v)", remoteName, refSpec, force)
-
-	err = repo.PushContext(ctx, &git.PushOptions{
-		RemoteName: remoteName,
-		Auth:       auth,
-		RefSpecs:   []gitconfig.RefSpec{refSpec},
-		Force:      force,
-	})
-
-	if err != nil {
-		if errors.Is(err, git.NoErrAlreadyUpToDate) {
-			return "Already up-to-date", nil
-		}
-		return "", fmt.Errorf("failed to push: %w", err)
+			home, _ := os.UserHomeDir()
+			for _, n := range []string{"id_ed25519", "id_rsa", "id_ecdsa"} {
+				if key, err := os.ReadFile(filepath.Join(home, ".ssh", n)); err == nil {
+					if s, err := ssh.ParsePrivateKey(key); err == nil {
+						signers = append(signers, s)
+					}
+				}
+			}
+			return signers, nil
+		},
 	}
-
-	// DEBUG: Verify state after push
-	newLocalHead, _ := repo.Head()
-	log.Printf("[DEBUG] Local HEAD after push: %s", newLocalHead.Hash())
-
-	return "Push successful", nil
-}
-
-// ResolvePath returns a list of all repository files within the given path.
-func (s *Service) ResolvePath(path string) ([]string, error) {
-	repo, worktree, root, err := getRepo()
-	if err != nil {
-		return nil, fmt.Errorf("failed to open repository: %w", err)
-	}
-
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute path: %w", err)
-	}
-
-	rel, err := filepath.Rel(root, abs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get relative path: %w", err)
-	}
-
-	info, err := os.Stat(abs)
-	if err != nil || !info.IsDir() {
-		if strings.HasPrefix(rel, "..") {
-			return nil, ErrOutsideRepo
-		}
-		return []string{rel}, nil
-	}
-
-	status, _ := worktree.Status()
-	headTree, _ := getHeadTree(repo)
-
-	prefix := rel
-	if prefix == "." {
-		prefix = ""
-	}
-	if prefix != "" && !strings.HasSuffix(prefix, "/") {
-		prefix += "/"
-	}
-
-	seen := make(map[string]bool)
-	var results []string
-
-	add := func(p string) {
-		if (prefix == "" || strings.HasPrefix(p, prefix)) && !seen[p] {
-			results = append(results, p)
-			seen[p] = true
-		}
-	}
-
-	for p := range status {
-		add(p)
-	}
-
-	if headTree != nil {
-		_ = headTree.Files().ForEach(func(f *object.File) error {
-			add(f.Name)
-			return nil
-		})
-	}
-
-	sort.Strings(results)
-	return results, nil
+	auth.HostKeyCallback = ssh.InsecureIgnoreHostKey()
+	return auth
 }
 
 // ExtractVersionFromDiff scans a unified diff for lines that look like version updates.
-// It returns a string representing the change, e.g., "0.4.0 -> 0.5.0".
 func ExtractVersionFromDiff(diffText string) string {
 	lines := strings.Split(diffText, "\n")
-
-	// Improved regex: look for something that starts with a digit,
-	// contains at least one dot, and then more digits/dots/alphanumerics.
 	versionRegex := regexp.MustCompile(`([0-9]+\.[0-9][0-9a-z.-]*)`)
 
 	var oldVersion, newVersion string
@@ -566,236 +495,91 @@ func ExtractVersionFromDiff(diffText string) string {
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "diff --git") {
-			parts := strings.Fields(line)
-			if len(parts) >= 4 {
+			if parts := strings.Fields(line); len(parts) >= 4 {
 				currentFile = filepath.Base(parts[3])
 			}
 			continue
 		}
 
-		// Only look for versions in specific files likely to contain project versioning
-		// and EXCLUDE test files explicitly.
-		isPotentialVersionFile := (strings.EqualFold(currentFile, "VERSION") ||
-			strings.EqualFold(currentFile, "package.json") ||
-			strings.EqualFold(currentFile, "go.mod") ||
-			strings.EqualFold(currentFile, "Cargo.toml") ||
-			strings.EqualFold(currentFile, "pyproject.toml") ||
-			strings.EqualFold(currentFile, "composer.json") ||
-			strings.EqualFold(currentFile, "Gemfile") ||
-			strings.EqualFold(currentFile, "mix.exs") ||
-			strings.EqualFold(currentFile, "version.rb") ||
-			strings.EqualFold(currentFile, "version.py") ||
-			strings.EqualFold(currentFile, "setup.py") ||
-			strings.EqualFold(currentFile, "CMakeLists.txt")) &&
-			!strings.Contains(strings.ToLower(currentFile), "test") &&
-			!strings.Contains(strings.ToLower(currentFile), "_spec")
+		if !isVersionFile(currentFile) {
+			continue
+		}
 
 		lowerLine := strings.ToLower(line)
-		containsVersionKeyword := strings.Contains(lowerLine, "version") &&
-			!strings.Contains(lowerLine, "versioning") &&
-			!strings.Contains(strings.ToLower(currentFile), "test")
-
-		if isPotentialVersionFile || containsVersionKeyword {
-			// Extract from a removed line
+		if strings.Contains(lowerLine, "version") && !strings.Contains(lowerLine, "versioning") {
 			if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-				content := line[1:]
-				if matches := versionRegex.FindStringSubmatch(content); len(matches) > 1 {
+				if matches := versionRegex.FindStringSubmatch(line[1:]); len(matches) > 1 {
 					oldVersion = matches[1]
 				}
 			}
-			// Extract from the added line
 			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-				content := line[1:]
-				if matches := versionRegex.FindStringSubmatch(content); len(matches) > 1 {
+				if matches := versionRegex.FindStringSubmatch(line[1:]); len(matches) > 1 {
 					newVersion = matches[1]
 				}
 			}
 		}
 
-		// If we found both in the same file hunk, and they are different, we're likely done
 		if oldVersion != "" && newVersion != "" && oldVersion != newVersion {
 			return fmt.Sprintf("%s -> %s", oldVersion, newVersion)
 		}
 	}
-
 	return newVersion
 }
 
-// GetPullRequestURL generates a web URL to create a new pull request for the current branch.
-func (s *Service) GetPullRequestURL(remoteName string) (string, error) {
-	repo, _, _, err := getRepo()
-	if err != nil {
-		return "", fmt.Errorf("failed to open repository: %w", err)
+// --- Utility Helpers ---
+
+func isVersionFile(filename string) bool {
+	f := strings.ToLower(filename)
+	if strings.Contains(f, "test") || strings.Contains(f, "_spec") {
+		return false
 	}
-
-	head, err := repo.Head()
-	if err != nil {
-		return "", fmt.Errorf("failed to get HEAD: %w", err)
+	targets := []string{
+		"version", "package.json", "go.mod", "cargo.toml", "pyproject.toml",
+		"composer.json", "gemfile", "mix.exs", "version.rb", "version.py",
+		"setup.py", "cmakelists.txt",
 	}
-	branch := head.Name().Short()
-	if !head.Name().IsBranch() {
-		branch = head.Hash().String()
-	}
-
-	remote, err := repo.Remote(remoteName)
-	if err != nil || len(remote.Config().URLs) == 0 {
-		return "", fmt.Errorf("no remote %s found", remoteName)
-	}
-
-	remoteUrl := remote.Config().URLs[0]
-	remoteUrl = normalizeGitURL(remoteUrl)
-
-	switch {
-	case strings.Contains(remoteUrl, "github.com"):
-		return fmt.Sprintf("%s/pull/new/%s", remoteUrl, branch), nil
-	case strings.Contains(remoteUrl, "gitlab.com"):
-		return fmt.Sprintf("%s/-/merge_requests/new?merge_request[source_branch]=%s", remoteUrl, branch), nil
-	case strings.Contains(remoteUrl, "bitbucket.org"):
-		return fmt.Sprintf("%s/pull-requests/new?source=%s", remoteUrl, branch), nil
-	default:
-		return "", fmt.Errorf("unknown host: %s", remoteUrl)
-	}
-}
-
-// --- Internal Helper Functions ---
-
-func resolveAuth(urlStr string) transport.AuthMethod {
-	if strings.HasPrefix(urlStr, "http") {
-		return nil
-	}
-
-	if !strings.HasPrefix(urlStr, "ssh://") && !strings.Contains(urlStr, "@") {
-		return nil
-	}
-
-	user := "git"
-	if parts := strings.Split(urlStr, "@"); len(parts) > 1 {
-		user = parts[0]
-		if strings.Contains(user, "://") {
-			user = strings.Split(user, "://")[1]
+	for _, t := range targets {
+		if strings.EqualFold(f, t) {
+			return true
 		}
 	}
-
-	keyCallback := func() ([]ssh.Signer, error) {
-		var signers []ssh.Signer
-		// 1. Try SSH Agent
-		if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
-			dialer := &net.Dialer{}
-			if conn, err := dialer.Dial("unix", sock); err == nil {
-				if s, err := agent.NewClient(conn).Signers(); err == nil {
-					signers = append(signers, s...)
-				}
-			}
-		}
-
-		// If agent has keys, return them. Mixing agent + explicit keys can cause "too many auth failures".
-		// Typically if you have an agent, your keys are in it.
-		if len(signers) > 0 {
-			return signers, nil
-		}
-
-		// 2. Try standard key files only
-		home, _ := os.UserHomeDir()
-		commonNames := []string{"id_ed25519", "id_rsa", "id_ecdsa"}
-
-		for _, name := range commonNames {
-			path := filepath.Join(home, ".ssh", name)
-			if key, err := os.ReadFile(path); err == nil {
-				if signer, err := ssh.ParsePrivateKey(key); err == nil {
-					signers = append(signers, signer)
-				}
-			}
-		}
-
-		if len(signers) == 0 {
-			return nil, errors.New("no ssh keys found in agent or standard ~/.ssh locations")
-		}
-		return signers, nil
-	}
-
-	auth := &gitssh.PublicKeysCallback{
-		User:     user,
-		Callback: keyCallback,
-	}
-
-	auth.HostKeyCallback = ssh.InsecureIgnoreHostKey()
-
-	return auth
+	return false
 }
 
 func getRepo() (*git.Repository, *git.Worktree, string, error) {
 	root, err := GetGitRoot()
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to get git root: %w", err)
+		return nil, nil, "", err
 	}
 	repo, err := git.PlainOpen(root)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to open git repo at %s: %w", root, err)
+		return nil, nil, "", err
 	}
-	worktree, err := repo.Worktree()
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to get worktree: %w", err)
-	}
-	return repo, worktree, root, nil
+	wt, err := repo.Worktree()
+	return repo, wt, root, err
 }
 
-func toRel(path string) (string, error) {
-	root, err := GetGitRoot()
-	if err != nil {
-		return "", fmt.Errorf("failed to get git root: %w", err)
-	}
-
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to get absolute path: %w", err)
-	}
-
-	rel, err := filepath.Rel(root, abs)
-	if err != nil {
-		return "", fmt.Errorf("failed to get relative path: %w", err)
-	}
-
-	if strings.HasPrefix(rel, "..") {
-		return "", ErrOutsideRepo
-	}
-	return rel, nil
-}
-
-func getHeadTree(repo *git.Repository) (*object.Tree, error) {
+func (s *Service) getHeadTree(repo *git.Repository) (*object.Tree, error) {
 	head, err := repo.Head()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get HEAD: %w", err)
+		return nil, err
 	}
-	commitObj, err := repo.CommitObject(head.Hash())
+	commit, err := repo.CommitObject(head.Hash())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get commit object: %w", err)
+		return nil, err
 	}
-	tree, err := commitObj.Tree()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tree: %w", err)
-	}
-	return tree, nil
+	return commit.Tree()
 }
 
 func formatStatusCode(c git.StatusCode) rune {
-	switch c {
-	case git.Unmodified:
-		return ' '
-	case git.Modified:
-		return 'M'
-	case git.Added:
-		return 'A'
-	case git.Deleted:
-		return 'D'
-	case git.Renamed:
-		return 'R'
-	case git.Copied:
-		return 'C'
-	case git.Untracked:
-		return '?'
-	default:
-		return '?'
+	mapping := map[git.StatusCode]rune{
+		git.Unmodified: ' ', git.Modified: 'M', git.Added: 'A',
+		git.Deleted: 'D', git.Renamed: 'R', git.Copied: 'C', git.Untracked: '?',
 	}
+	if r, ok := mapping[c]; ok {
+		return r
+	}
+	return '?'
 }
 
 // generateDiffString creates a unified diff compatible with standard git output.
@@ -807,48 +591,71 @@ func formatStatusCode(c git.StatusCode) rune {
 func generateDiffString(path, oldText, newText string, isNew, isDel bool) (result string) {
 	defer func() {
 		if r := recover(); r != nil {
-			// Fallback if diffmatchpatch panics
-			result = fmt.Sprintf("diff --git a/%s b/%s\n(Diff generation failed: %v)\n", path, path, r)
+			result = fmt.Sprintf("diff --git a/%s b/%s\n(Diff failed: %v)\n", path, path, r)
 		}
 	}()
 
 	dmp := diffmatchpatch.New()
-	patches := dmp.PatchMake(oldText, newText)
-	patchText := dmp.PatchToText(patches)
-
-	// Normalize the text to avoid URL encoding
-	decoded, _ := url.PathUnescape(patchText)
-
 	diffs := dmp.DiffMain(oldText, newText, false)
 	dmp.DiffCleanupSemantic(diffs)
 
-	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", path, path))
-	switch {
-	case isNew:
-		builder.WriteString(fmt.Sprintf("new file mode 100644\n--- /dev/null\n+++ b/%s\n", path))
-	case isDel:
-		builder.WriteString(fmt.Sprintf("deleted file mode 100644\n--- a/%s\n+++ /dev/null\n", path))
-	default:
-		builder.WriteString(fmt.Sprintf("--- a/%s\n+++ b/%s\n", path, path))
+	patches := dmp.PatchMake(oldText, newText)
+	decoded, _ := url.PathUnescape(dmp.PatchToText(patches))
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", path, path))
+	if isNew {
+		b.WriteString(fmt.Sprintf("new file mode 100644\n--- /dev/null\n+++ b/%s\n", path))
+	} else if isDel {
+		b.WriteString(fmt.Sprintf("deleted file mode 100644\n--- a/%s\n+++ /dev/null\n", path))
+	} else {
+		b.WriteString(fmt.Sprintf("--- a/%s\n+++ b/%s\n", path, path))
+	}
+	b.WriteString(decoded)
+	return b.String()
+}
+
+func (s *Service) GetPullRequestURL(remoteName string) (string, error) {
+	ctx, err := s.getRepoContext()
+	if err != nil {
+		return "", err
 	}
 
-	builder.WriteString(decoded)
+	head, err := ctx.repo.Head()
+	if err != nil {
+		return "", err
+	}
+	branch := head.Name().Short()
 
-	return builder.String()
+	remote, err := ctx.repo.Remote(remoteName)
+	if err != nil || len(remote.Config().URLs) == 0 {
+		return "", err
+	}
+
+	urlStr := normalizeGitURL(remote.Config().URLs[0])
+	switch {
+	case strings.Contains(urlStr, "github.com"):
+		return fmt.Sprintf("%s/pull/new/%s", urlStr, branch), nil
+	case strings.Contains(urlStr, "gitlab.com"):
+		return fmt.Sprintf("%s/-/merge_requests/new?merge_request[source_branch]=%s", urlStr, branch), nil
+	case strings.Contains(urlStr, "bitbucket.org"):
+		return fmt.Sprintf("%s/pull-requests/new?source=%s", urlStr, branch), nil
+	}
+	return "", fmt.Errorf("unsupported host: %s", urlStr)
 }
 
 func normalizeGitURL(rawURL string) string {
-	cleanURL := strings.TrimSpace(rawURL)
-	cleanURL = strings.TrimSuffix(cleanURL, ".git")
-	if strings.HasPrefix(cleanURL, "git@") {
-		cleanURL = "https://" + strings.Replace(strings.TrimPrefix(cleanURL, "git@"), ":", "/", 1)
-	} else if strings.HasPrefix(cleanURL, "ssh://") {
-		cleanURL = "https://" + strings.TrimPrefix(strings.Split(cleanURL, "@")[1], ":")
+	u := strings.TrimSuffix(strings.TrimSpace(rawURL), ".git")
+	if strings.HasPrefix(u, "git@") {
+		u = "https://" + strings.Replace(strings.TrimPrefix(u, "git@"), ":", "/", 1)
+	} else if strings.HasPrefix(u, "ssh://") {
+		parts := strings.Split(u, "@")
+		if len(parts) > 1 {
+			u = "https://" + parts[1]
+		}
 	}
-
-	if !strings.HasPrefix(cleanURL, "http") {
-		cleanURL = "https://" + cleanURL
+	if !strings.HasPrefix(u, "http") {
+		u = "https://" + u
 	}
-	return cleanURL
+	return u
 }
