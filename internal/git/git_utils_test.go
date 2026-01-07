@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-git/go-git/v5"
-	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/go-git/go-git/v6"
+	gitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 )
 
 func TestFormatStatusCode(t *testing.T) {

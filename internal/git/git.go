@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	gitconfig "github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/transport"
-	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/go-git/go-git/v6"
+	gitconfig "github.com/go-git/go-git/v6/config"
+	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/go-git/go-git/v6/plumbing/transport"
+	gitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -712,6 +712,7 @@ func resolveAuth(urlStr string) transport.AuthMethod {
 
 	keyCallback := func() ([]ssh.Signer, error) {
 		var signers []ssh.Signer
+		// 1. Try SSH Agent
 		if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 			dialer := &net.Dialer{}
 			if conn, err := dialer.Dial("unix", sock); err == nil {
@@ -721,15 +722,19 @@ func resolveAuth(urlStr string) transport.AuthMethod {
 			}
 		}
 
-		home, _ := os.UserHomeDir()
-		files, _ := os.ReadDir(filepath.Join(home, ".ssh"))
-		for _, f := range files {
-			if f.IsDir() || strings.HasSuffix(f.Name(), ".pub") ||
-				strings.HasPrefix(f.Name(), "known_") || strings.HasPrefix(f.Name(), "config") {
-				continue
-			}
+		// If agent has keys, return them. Mixing agent + explicit keys can cause "too many auth failures".
+		// Typically if you have an agent, your keys are in it.
+		if len(signers) > 0 {
+			return signers, nil
+		}
 
-			if key, err := os.ReadFile(filepath.Join(home, ".ssh", filepath.Clean(f.Name()))); err == nil {
+		// 2. Try standard key files only
+		home, _ := os.UserHomeDir()
+		commonNames := []string{"id_ed25519", "id_rsa", "id_ecdsa"}
+
+		for _, name := range commonNames {
+			path := filepath.Join(home, ".ssh", name)
+			if key, err := os.ReadFile(path); err == nil {
 				if signer, err := ssh.ParsePrivateKey(key); err == nil {
 					signers = append(signers, signer)
 				}
@@ -737,7 +742,7 @@ func resolveAuth(urlStr string) transport.AuthMethod {
 		}
 
 		if len(signers) == 0 {
-			return nil, errors.New("no ssh keys found in agent or ~/.ssh")
+			return nil, errors.New("no ssh keys found in agent or standard ~/.ssh locations")
 		}
 		return signers, nil
 	}
