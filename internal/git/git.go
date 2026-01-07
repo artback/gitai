@@ -478,6 +478,23 @@ func (s *Service) Push(ctx context.Context, remoteName string) (string, error) {
 
 	auth := resolveAuth(urls[0])
 
+	// 1. Get the current branch (HEAD)
+	head, err := repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("failed to get HEAD: %w", err)
+	}
+
+	// 2. Build the RefSpec (e.g., "refs/heads/push:refs/heads/push")
+	branchName := head.Name()
+	refSpec := gitconfig.RefSpec(fmt.Sprintf("%s:%s", branchName, branchName))
+
+	// 3. Push with the specific RefSpec
+	err = repo.PushContext(ctx, &git.PushOptions{
+		RemoteName: remoteName,
+		Auth:       auth,
+		RefSpecs:   []gitconfig.RefSpec{refSpec},
+	})
+
 	err = repo.PushContext(ctx, &git.PushOptions{
 		RemoteName: remoteName,
 		Auth:       auth,
@@ -637,7 +654,7 @@ func ExtractVersionFromDiff(diffText string) string {
 					oldVersion = matches[1]
 				}
 			}
-			// Extract from added line
+			// Extract from the added line
 			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
 				content := line[1:]
 				if matches := versionRegex.FindStringSubmatch(content); len(matches) > 1 {
