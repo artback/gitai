@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/url"
 	"os"
@@ -347,8 +348,17 @@ func (s *Service) GetAmendChangesForFiles(files []string) (string, error) {
 	return builder.String(), nil
 }
 
-// CommitAmend amends the last commit with the staged changes of the specified files.
+// Commit stages the specified files and creates a new commit.
+func (s *Service) Commit(files []string, message string) error {
+	return s.performCommit(files, message, false)
+}
+
+// CommitAmend amends the last commit with the staged changes.
 func (s *Service) CommitAmend(files []string, message string) error {
+	return s.performCommit(files, message, true)
+}
+
+func (s *Service) performCommit(files []string, message string, amend bool) error {
 	repo, worktree, _, err := getRepo()
 	if err != nil {
 		return fmt.Errorf("failed to open repository: %w", err)
@@ -365,64 +375,33 @@ func (s *Service) CommitAmend(files []string, message string) error {
 		}
 	}
 
-	// 2. Get HEAD and its parents to preserve/update lineage
-	head, err := repo.Head()
-	if err != nil {
-		return fmt.Errorf("failed to get HEAD: %w", err)
-	}
-	headCommit, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		return fmt.Errorf("failed to get HEAD commit: %w", err)
-	}
-
-	parents := headCommit.ParentHashes
-	// If we are amending, we keep the SAME parents as the commit we are replacing.
-	// So we don't include HEAD itself, but HEAD's parents.
-
 	sig, err := s.getAuthorSignature(repo)
 	if err != nil {
 		return err
 	}
 
-	// 3. Commit with explicit parents (Amending)
-	_, err = worktree.Commit(message, &git.CommitOptions{
-		Author:  sig,
-		Parents: parents,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to amend commit: %w", err)
-	}
-	return nil
-}
+	opts := &git.CommitOptions{Author: sig}
 
-// Commit stages the specified files and creates a new commit with the given message.
-func (s *Service) Commit(files []string, message string) error {
-	repo, worktree, _, err := getRepo()
-	if err != nil {
-		return fmt.Errorf("failed to open repository: %w", err)
-	}
-
-	for _, file := range files {
-		rel, err := toRel(file)
+	// 2. Handle Amending logic
+	if amend {
+		head, err := repo.Head()
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get HEAD for amend: %w", err)
 		}
-		if _, err := worktree.Add(rel); err != nil {
-			return fmt.Errorf("failed to add file %s: %w", rel, err)
+		headCommit, err := repo.CommitObject(head.Hash())
+		if err != nil {
+			return fmt.Errorf("failed to get HEAD commit: %w", err)
 		}
+		// Set parents to current HEAD's parents (bypassing HEAD itself)
+		opts.Parents = headCommit.ParentHashes
 	}
 
-	sig, err := s.getAuthorSignature(repo)
+	// 3. Perform the commit
+	_, err = worktree.Commit(message, opts)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to commit (amend=%v): %w", amend, err)
 	}
 
-	_, err = worktree.Commit(message, &git.CommitOptions{
-		Author: sig,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create commit: %w", err)
-	}
 	return nil
 }
 
@@ -461,85 +440,55 @@ func getNameEmail(c *gitconfig.Config) (string, string) {
 
 // Push pushes the current branch to the specified remote.
 func (s *Service) Push(ctx context.Context, remoteName string) (string, error) {
+	return s.performPush(ctx, remoteName, false)
+}
+
+// PushForce pushes the current branch to the specified remote with the force flag.
+func (s *Service) PushForce(ctx context.Context, remoteName string) (string, error) {
+	return s.performPush(ctx, remoteName, true)
+}
+
+// performPush contains the shared logic for both standard and force pushes.
+func (s *Service) performPush(ctx context.Context, remoteName string, force bool) (string, error) {
 	repo, _, _, err := getRepo()
 	if err != nil {
 		return "", fmt.Errorf("failed to open repository: %w", err)
 	}
+
+	// DEBUG: Current Local HEAD
+	localHead, _ := repo.Head()
+	log.Printf("[DEBUG] Local HEAD before push: %s (%s)", localHead.Name(), localHead.Hash())
 
 	remote, err := repo.Remote(remoteName)
 	if err != nil {
 		return "", fmt.Errorf("remote '%s' not found: %w", remoteName, err)
 	}
 
-	urls := remote.Config().URLs
-	if len(urls) == 0 {
-		return "", fmt.Errorf("remote '%s' has no URLs", remoteName)
-	}
-
-	auth := resolveAuth(urls[0])
-
-	// 1. Get the current branch (HEAD)
-	head, err := repo.Head()
-	if err != nil {
-		return "", fmt.Errorf("failed to get HEAD: %w", err)
-	}
-
-	// 2. Build the RefSpec (e.g., "refs/heads/push:refs/heads/push")
-	branchName := head.Name()
+	auth := resolveAuth(remote.Config().URLs[0])
+	branchName := localHead.Name()
 	refSpec := gitconfig.RefSpec(fmt.Sprintf("%s:%s", branchName, branchName))
 
-	// 3. Push with the specific RefSpec
+	log.Printf("[DEBUG] Attempting push to %s with RefSpec: %s (Force: %v)", remoteName, refSpec, force)
+
 	err = repo.PushContext(ctx, &git.PushOptions{
 		RemoteName: remoteName,
 		Auth:       auth,
 		RefSpecs:   []gitconfig.RefSpec{refSpec},
+		Force:      force,
 	})
 
-	err = repo.PushContext(ctx, &git.PushOptions{
-		RemoteName: remoteName,
-		Auth:       auth,
-	})
 	if err != nil {
 		if errors.Is(err, git.NoErrAlreadyUpToDate) {
 			return "Already up-to-date", nil
 		}
 		return "", fmt.Errorf("failed to push: %w", err)
 	}
+
+	// DEBUG: Verify state after push
+	newLocalHead, _ := repo.Head()
+	log.Printf("[DEBUG] Local HEAD after push: %s", newLocalHead.Hash())
+
 	return "Push successful", nil
-}
-
-// PushForce pushes the current branch to the specified remote with --force using the system git command.
-func (s *Service) PushForce(ctx context.Context, remoteName string) (string, error) {
-	repo, _, _, err := getRepo()
-	if err != nil {
-		return "", fmt.Errorf("failed to open repository: %w", err)
-	}
-
-	remote, err := repo.Remote(remoteName)
-	if err != nil {
-		return "", fmt.Errorf("remote '%s' not found: %w", remoteName, err)
-	}
-
-	urls := remote.Config().URLs
-	if len(urls) == 0 {
-		return "", fmt.Errorf("remote '%s' has no URLs", remoteName)
-	}
-
-	auth := resolveAuth(urls[0])
-
-	err = repo.PushContext(ctx, &git.PushOptions{
-		RemoteName: remoteName,
-		Auth:       auth,
-		Force:      true,
-	})
-	if err != nil {
-		if errors.Is(err, git.NoErrAlreadyUpToDate) {
-			return "Already up-to-date", nil
-		}
-		return "", fmt.Errorf("failed to force push: %w", err)
-	}
-
-	return "Force Push successful", nil
 }
 
 // ResolvePath returns a list of all repository files within the given path.
