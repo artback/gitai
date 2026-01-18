@@ -75,6 +75,7 @@ func (s *Service) extractFileHunks(rel, full string, oldTree *object.Tree, idCou
 	}
 
 	dmp := diffmatchpatch.New()
+	dmp.PatchMargin = 1 // Use 1-line context to save tokens for AI
 	a, b, c := dmp.DiffLinesToChars(oldText, newText)
 	diffs := dmp.DiffMain(a, b, false)
 	diffs = dmp.DiffCharsToLines(diffs, c)
@@ -86,10 +87,10 @@ func (s *Service) extractFileHunks(rel, full string, oldTree *object.Tree, idCou
 	for _, p := range patches {
 		singlePatchList := []diffmatchpatch.Patch{p}
 		hunkContent, _ := url.PathUnescape(dmp.PatchToText(singlePatchList))
-		
+
 		endLine := p.Start2 + p.Length2
 		if p.Length2 > 0 {
-			endLine-- 
+			endLine--
 		}
 
 		hunk := DiffHunk{
@@ -159,7 +160,7 @@ func (s *Service) ApplyHunks(hunks []DiffHunk) error {
 		obj := ctx.repo.Storer.NewEncodedObject()
 		obj.SetType(plumbing.BlobObject)
 		obj.SetSize(int64(len(newContent)))
-		
+
 		writer, err := obj.Writer()
 		if err != nil {
 			return fmt.Errorf("failed to create blob writer: %w", err)
@@ -182,12 +183,12 @@ func (s *Service) ApplyHunks(hunks []DiffHunk) error {
 			entry = &index.Entry{Name: file}
 			idx.Entries = append(idx.Entries, entry)
 		}
-		
+
 		entry.Hash = hash
 		entry.ModifiedAt = time.Now()
 		entry.Size = uint32(len(newContent))
-		entry.Mode = filemode.Regular 
-		
+		entry.Mode = filemode.Regular
+
 		if info, err := os.Stat(filepath.Join(ctx.root, file)); err == nil {
 			entry.ModifiedAt = info.ModTime()
 		}
