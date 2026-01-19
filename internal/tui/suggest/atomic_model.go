@@ -35,9 +35,17 @@ type atomicPushMsg struct {
 	output string
 }
 
+type AtomicGitService interface {
+	GetHunks(files []string) ([]git.DiffHunk, error)
+	ApplyHunks(hunks []git.DiffHunk) error
+	CommitStaged(message string) error
+	Push(ctx context.Context, remoteName string) (string, error)
+	HasRemotes() (bool, error)
+}
+
 type AtomicModel struct {
 	generator    AtomicGenerator
-	gitService   suggestGitService
+	gitService   AtomicGitService
 	ctx          context.Context
 	files        []string
 	hint         string
@@ -55,7 +63,7 @@ type AtomicModel struct {
 	hasRemotes   bool
 }
 
-func NewAtomicModel(ctx context.Context, files []string, generator AtomicGenerator, gs suggestGitService, editorMode, hint string, hasRemotes bool) AtomicModel {
+func NewAtomicModel(ctx context.Context, files []string, generator AtomicGenerator, gs AtomicGitService, editorMode, hint string, hasRemotes bool) AtomicModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = shared.CursorStyle

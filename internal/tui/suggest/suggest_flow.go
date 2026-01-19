@@ -8,7 +8,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"huseynovvusal/gitai/internal/ai"
-	"huseynovvusal/gitai/internal/git"
 )
 
 var LinksRegex = regexp.MustCompile(`remote:\s*(https?://\S+)`)
@@ -41,15 +40,12 @@ type suggestGitService interface {
 	GitPRGenerator
 	GitDiffStatus
 	GitCommitter
+	AtomicGitService
 	GetLastCommitMessage() (string, error)
 	GetFilesInLastCommit() ([]string, error)
 	GetAmendChangesForFiles(files []string) (string, error)
 	CommitAmend(files []string, message string) error
 	PushForce(ctx context.Context, remoteName string) (string, error)
-	GetHunks(files []string) ([]git.DiffHunk, error)
-	ApplyHunks(hunks []git.DiffHunk) error
-	CommitStaged(message string) error
-	HasRemotes() (bool, error)
 }
 
 type Flow struct {
