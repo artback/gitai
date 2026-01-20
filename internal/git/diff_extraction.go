@@ -28,7 +28,7 @@ func (s *Service) GetHunks(files []string) ([]DiffHunk, error) {
 		headTree, _ = ctx.head.Tree()
 	}
 
-	var hunks []DiffHunk
+	hunks := make([]DiffHunk, 0, len(files))
 	globalID := 1
 
 	for _, p := range files {
