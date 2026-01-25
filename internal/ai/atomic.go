@@ -41,15 +41,7 @@ func (s *Service) GenerateAtomic(ctx context.Context, hunksInput string, hint st
 		userMessage += "\n\nUser hint: " + hint
 	}
 
-	// We don't compress whitespace for atomic prompt as hunks need structure?
-	// Actually, hunks contain code, compressing whitespace breaks diffs!
-	// Existing 'Generate' does compressWhitespace... wait.
-	// If 'Generate' compresses whitespace of the DIFF, it might break it?
-	// Let's check 'Generate'.
-	// userMessage = compressWhitespace(userMessage) -> yes it does.
-	// This might be a bug in existing code if it mangles diffs, or maybe it's just meant for the prompt text?
-	// compressWhitespace uses regex `\s+` -> " ". This definitely breaks code diffs.
-	// However, for this new feature, I definitely should NOT compress whitespace of the hunks.
+	// We do not compress whitespace here because hunks contain code where whitespace is significant.
 
 	resp, err := s.provider.GenerateContent(ctx, atomicSystemPrompt, userMessage)
 	if err != nil {
