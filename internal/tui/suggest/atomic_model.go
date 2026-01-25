@@ -28,12 +28,14 @@ const (
 	AtomicStateError
 )
 
-type atomicPlanMsg []ai.AtomicCommit
-type atomicExecMsg struct{ err error }
-type atomicPushMsg struct {
-	err    error
-	output string
-}
+type (
+	atomicPlanMsg []ai.AtomicCommit
+	atomicExecMsg struct{ err error }
+	atomicPushMsg struct {
+		err    error
+		output string
+	}
+)
 
 type AtomicGitService interface {
 	GetHunks(files []string) ([]git.DiffHunk, error)
@@ -44,23 +46,23 @@ type AtomicGitService interface {
 }
 
 type AtomicModel struct {
-	generator    AtomicGenerator
-	gitService   AtomicGitService
-	ctx          context.Context
-	files        []string
-	hint         string
-	hunks        []git.DiffHunk
-	hunkMap      map[int]git.DiffHunk
-	commits      []ai.AtomicCommit
-	cursor       int
-	state        AtomicState
-	spinner      spinner.Model
-	errMsg       string
-	textArea     textarea.Model
-	editorMode   string
-	hunksString  string
-	pushOutput   string
-	hasRemotes   bool
+	generator   AtomicGenerator
+	gitService  AtomicGitService
+	ctx         context.Context
+	files       []string
+	hint        string
+	hunks       []git.DiffHunk
+	hunkMap     map[int]git.DiffHunk
+	commits     []ai.AtomicCommit
+	cursor      int
+	state       AtomicState
+	spinner     spinner.Model
+	errMsg      string
+	textArea    textarea.Model
+	editorMode  string
+	hunksString string
+	pushOutput  string
+	hasRemotes  bool
 }
 
 func NewAtomicModel(ctx context.Context, files []string, generator AtomicGenerator, gs AtomicGitService, editorMode, hint string, hasRemotes bool) AtomicModel {
@@ -313,7 +315,7 @@ func (m *AtomicModel) View() string {
 				cursor = ">"
 				style = shared.SelectedTextStyle
 			}
-			
+
 			b.WriteString(fmt.Sprintf("%s %d. %s\n", cursor, i+1, style.Render(c.Message)))
 			for _, hid := range c.HunkIDs {
 				if h, ok := m.hunkMap[hid]; ok {

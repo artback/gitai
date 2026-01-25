@@ -82,7 +82,7 @@ func (s *Service) extractFileHunks(rel, full string, oldTree *object.Tree, idCou
 	dmp.DiffCleanupSemantic(diffs)
 	patches := dmp.PatchMake(diffs)
 
-	var hunks = make([]DiffHunk,0,len(patches))
+	hunks := make([]DiffHunk, 0, len(patches))
 
 	for _, p := range patches {
 		singlePatchList := []diffmatchpatch.Patch{p}

@@ -2,9 +2,10 @@ package suggest
 
 import (
 	"context"
-	"huseynovvusal/gitai/internal/git"
 	"strings"
 	"testing"
+
+	"huseynovvusal/gitai/internal/git"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -61,10 +62,10 @@ func (m *mockMessageService) PushForce(_ context.Context, _ string) (string, err
 // used by Flow tests which coordinate multiple components.
 type mockGitService struct {
 	mockMessageService // Embed the message service behavior
-	resolveResponse []string
-	prURL           string
+	resolveResponse    []string
+	prURL              string
 	// changedFiles stored here for RepoStatus
-	changedFiles    []string
+	changedFiles []string
 }
 
 // Ensure mockGitService implements suggestGitService
