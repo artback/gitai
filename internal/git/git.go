@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-git/go-git/v6"
 	gitconfig "github.com/go-git/go-git/v6/config"
+	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
 	"github.com/go-git/go-git/v6/plumbing/transport"
 	gitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
