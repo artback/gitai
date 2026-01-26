@@ -328,6 +328,16 @@ func TestGetPullRequestURL(t *testing.T) {
 
 	os.Chdir(dir)
 
+	// Create and checkout a feature branch so we get a PR URL
+	w, _ := r.Worktree()
+	err := w.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName("feature/test"),
+		Create: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	gs := NewService()
 
 	tests := []struct {
