@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v6"
 	gitconfig "github.com/go-git/go-git/v6/config"
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
 	"github.com/go-git/go-git/v6/plumbing/transport"
 	gitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
@@ -230,6 +231,23 @@ func (s *Service) GetPullRequestURL(remoteName string) (string, error) {
 		return "", fmt.Errorf("failed to get head: %w", err)
 	}
 	branch := head.Name().Short()
+
+	// Check if we are on the default branch to avoid showing PR link
+	refName := plumbing.ReferenceName(fmt.Sprintf("refs/remotes/%s/HEAD", remoteName))
+	ref, err := ctx.repo.Reference(refName, false)
+	if err == nil && ref.Type() == plumbing.SymbolicReference {
+		target := string(ref.Target())
+		prefix := fmt.Sprintf("refs/remotes/%s/", remoteName)
+		if strings.HasPrefix(target, prefix) {
+			defaultBranch := strings.TrimPrefix(target, prefix)
+			if branch == defaultBranch {
+				return "", nil
+			}
+		}
+	} else if branch == "main" || branch == "master" {
+		// Fallback: assume main/master are default if we can't determine it from remote HEAD
+		return "", nil
+	}
 
 	// Check if we are on the default branch to avoid showing PR link
 	refName := plumbing.ReferenceName(fmt.Sprintf("refs/remotes/%s/HEAD", remoteName))
