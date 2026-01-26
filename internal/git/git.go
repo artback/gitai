@@ -231,6 +231,23 @@ func (s *Service) GetPullRequestURL(remoteName string) (string, error) {
 	}
 	branch := head.Name().Short()
 
+	// Check if we are on the default branch to avoid showing PR link
+	refName := plumbing.ReferenceName(fmt.Sprintf("refs/remotes/%s/HEAD", remoteName))
+	ref, err := ctx.repo.Reference(refName, false)
+	if err == nil && ref.Type() == plumbing.SymbolicReference {
+		target := string(ref.Target())
+		prefix := fmt.Sprintf("refs/remotes/%s/", remoteName)
+		if strings.HasPrefix(target, prefix) {
+			defaultBranch := strings.TrimPrefix(target, prefix)
+			if branch == defaultBranch {
+				return "", nil
+			}
+		}
+	} else if branch == "main" || branch == "master" {
+		// Fallback: assume main/master are default if we can't determine it from remote HEAD
+		return "", nil
+	}
+
 	remote, err := ctx.repo.Remote(remoteName)
 	if err != nil || len(remote.Config().URLs) == 0 {
 		return "", fmt.Errorf("remote %s not found: %w", remoteName, err)
