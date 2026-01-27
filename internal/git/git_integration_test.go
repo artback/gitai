@@ -11,7 +11,6 @@ import (
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/config"
 	"github.com/go-git/go-git/v6/plumbing"
-	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
@@ -339,26 +338,16 @@ func TestGetPullRequestURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create and checkout a feature branch so we get a PR URL
-	w, _ := r.Worktree()
-	err := w.Checkout(&git.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName("feature/test"),
-		Create: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	gs := NewService()
 
 	tests := []struct {
 		name     string
-		{"GitHub", "https://github.com/user/repo.git", "https://github.com/user/repo/pull/new/feature/test"},
-		{"GitLab", "git@gitlab.com:user/repo.git", "https://gitlab.com/user/repo/-/merge_requests/new?merge_request[source_branch]=feature/test"},
-		{"Bitbucket", "https://bitbucket.org/user/repo", "https://bitbucket.org/user/repo/pull-requests/new?source=feature/test"},
 		remote   string
 		expected string
 	}{
+		{"GitHub", "https://github.com/user/repo.git", "https://github.com/user/repo/pull/new/feature/test"},
+		{"GitLab", "git@gitlab.com:user/repo.git", "https://gitlab.com/user/repo/-/merge_requests/new?merge_request[source_branch]=feature/test"},
+		{"Bitbucket", "https://bitbucket.org/user/repo", "https://bitbucket.org/user/repo/pull-requests/new?source=feature/test"},
 	}
 
 	for _, tt := range tests {

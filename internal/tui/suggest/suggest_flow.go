@@ -165,8 +165,14 @@ func (s *Flow) runAtomicFlow(ctx context.Context, selectedFiles []string, hint s
 	hasRemotes, _ := s.gitService.HasRemotes()
 	model := NewAtomicModel(ctx, selectedFiles, gen, s.gitService, s.config.EditorMode, hint, hasRemotes)
 	p := tea.NewProgram(&model, tea.WithContext(ctx))
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		fmt.Printf("Error running atomic flow: %v\n", err)
+		return
+	}
+
+	if m, ok := finalModel.(*AtomicModel); ok && m.state == AtomicStatePushed {
+		s.printPullRequestInfo(m.pushOutput)
 	}
 }
 
