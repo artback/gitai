@@ -2,6 +2,7 @@ package geminicli
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -29,7 +30,7 @@ func (r *Retryer) Do(ctx context.Context, fn func() error) error {
 
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
 			case <-time.After(delay):
 			}
 		}
