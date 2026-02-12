@@ -4,6 +4,8 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/pkoukk/tiktoken-go"
@@ -13,34 +15,75 @@ import (
 
 // MockProvider is a mock implementation of AIProvider.
 type MockProvider struct {
-	GenerateContentFunc func(ctx context.Context, systemMessage, userMessage string) (string, error)
+	GenerateContentFunc func(ctx context.Context, systemMessage, userMessage string) (string, provider.Usage, error)
 }
 
-func (m *MockProvider) GenerateContent(ctx context.Context, systemMessage, userMessage string) (string, error) {
+func (m *MockProvider) GenerateContent(ctx context.Context, systemMessage, userMessage string) (string, provider.Usage, error) {
 	if m.GenerateContentFunc != nil {
 		return m.GenerateContentFunc(ctx, systemMessage, userMessage)
 	}
 
-	return "", nil
+	return "", provider.Usage{}, nil
 }
 
 // Test that errors from provider propagate (e.g., ErrNoResponse).
 func TestService_Generate_PropagatesError(t *testing.T) {
 	mockProvider := &MockProvider{
-		GenerateContentFunc: func(ctx context.Context, systemMessage, userMessage string) (string, error) {
-			return "", provider.ErrNoResponse
+		GenerateContentFunc: func(ctx context.Context, systemMessage, userMessage string) (string, provider.Usage, error) {
+			return "", provider.Usage{}, provider.ErrNoResponse
 		},
 	}
 
-	service := NewService(mockProvider, "-")
+	service := NewService(mockProvider, "-", "")
 
-	_, err := service.Generate(context.Background(), "diff", "status", "", "1.0.0")
+	_, _, err := service.Generate(context.Background(), "diff", "status", "", "1.0.0")
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
 
 	if !errors.Is(err, provider.ErrNoResponse) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestService_Generate_LogsPromptToFile(t *testing.T) {
+	tempFile := t.TempDir() + "/debug_prompt.txt"
+	mockProvider := &MockProvider{
+		GenerateContentFunc: func(ctx context.Context, systemMessage, userMessage string) (string, provider.Usage, error) {
+			return "commit message", provider.Usage{}, nil
+		},
+	}
+
+	service := NewService(mockProvider, "-", tempFile)
+
+	_, _, err := service.Generate(context.Background(), "diff", "status", "hint", "1.0.0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	content, err := os.ReadFile(tempFile)
+	if err != nil {
+		t.Fatalf("failed to read debug file: %v", err)
+	}
+
+	if len(content) == 0 {
+		t.Fatalf("debug file is empty")
+	}
+
+	if !strings.Contains(string(content), "SYSTEM PROMPT:") {
+		t.Errorf("debug file does not contain SYSTEM PROMPT")
+	}
+
+	if !strings.Contains(string(content), "USER PROMPT:") {
+		t.Errorf("debug file does not contain USER PROMPT")
+	}
+
+	if !strings.Contains(string(content), "diff") {
+		t.Errorf("debug file does not contain diff")
+	}
+
+	if !strings.Contains(string(content), "hint") {
+		t.Errorf("debug file does not contain hint")
 	}
 }
 

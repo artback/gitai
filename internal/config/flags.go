@@ -18,6 +18,8 @@ func RegisterSuggestFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force", "f", false, "Force push changes (only valid with --amend)")
 
 	cmd.Flags().Bool("atomic", false, "Suggest atomic splits of changes into multiple commits")
+	cmd.Flags().BoolP("verbose", "v", false, "Show verbose output (e.g., token usage)")
+	cmd.Flags().String("debug-file", "", "Path to a file where the AI prompt will be logged for debugging")
 
 	_ = viper.BindPFlag("ai.provider", cmd.Flags().Lookup("provider"))
 	_ = viper.BindPFlag("ai.api_key", cmd.Flags().Lookup("api_key"))
@@ -29,4 +31,6 @@ func RegisterSuggestFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("suggest.amend", cmd.Flags().Lookup("amend"))
 	_ = viper.BindPFlag("suggest.force_push", cmd.Flags().Lookup("force"))
 	_ = viper.BindPFlag("suggest.atomic", cmd.Flags().Lookup("atomic"))
+	_ = viper.BindPFlag("suggest.verbose", cmd.Flags().Lookup("verbose"))
+	_ = viper.BindPFlag("ai.debug_file", cmd.Flags().Lookup("debug-file"))
 }
