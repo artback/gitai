@@ -207,7 +207,7 @@ func (c *Client) parseDetailedOutput(output []byte) (*DetailedResponse, error) {
 
 	var jr jsonResponse
 	if err := json.Unmarshal(output, &jr); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrParseOutput, err)
 	}
 
 	// Filter system messages from the response text
