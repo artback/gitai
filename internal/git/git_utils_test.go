@@ -111,21 +111,17 @@ func TestResolveAuth_Callback(t *testing.T) {
 
 func TestGenerateDiffString(t *testing.T) {
 	tests := []struct {
-		name      string
-		path      string
-		oldText   string
-		newText   string
-		isNew     bool
-		isDeleted bool
-		contains  []string
+		name     string
+		path     string
+		oldText  string
+		newText  string
+		contains []string
 	}{
 		{
 			"New File",
 			"main.go",
 			"",
 			"package main",
-			true,
-			false,
 			[]string{"--- main.go", "package main"},
 		},
 		{
@@ -133,8 +129,6 @@ func TestGenerateDiffString(t *testing.T) {
 			"README.md",
 			"Hello",
 			"Hello World",
-			false,
-			false,
 			[]string{"--- README.md", "Hello", "World"},
 		},
 		{
@@ -142,15 +136,13 @@ func TestGenerateDiffString(t *testing.T) {
 			"old.txt",
 			"content",
 			"",
-			false,
-			true,
 			[]string{"--- old.txt", "content"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := generateDiffString(tt.path, tt.oldText, tt.newText, tt.isNew, tt.isDeleted)
+			result := generateDiffString(tt.path, tt.oldText, tt.newText)
 			for _, s := range tt.contains {
 				if !strings.Contains(result, s) {
 					t.Errorf("Expected result to contain %q\nResult:\n%s", s, result)
