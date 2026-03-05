@@ -34,4 +34,5 @@ func RegisterSuggestFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("suggest.atomic", cmd.Flags().Lookup("atomic"))
 	_ = viper.BindPFlag("suggest.verbose", cmd.Flags().Lookup("verbose"))
 	_ = viper.BindPFlag("ai.debug_file", cmd.Flags().Lookup("debug-file"))
+	_ = viper.BindPFlag("ai.no_session", cmd.Flags().Lookup("no-session"))
 }

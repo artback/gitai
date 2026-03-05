@@ -208,22 +208,27 @@ func (p *OllamaProvider) GenerateContent(ctx context.Context, systemMessage, use
 
 // GeminiCLIProvider implements AIProvider for Gemini CLI Wrapper.
 type GeminiCLIProvider struct {
-	model string
+	model     string
+	noSession bool
 }
 
 // NewGeminiCLIProvider creates a new GeminiCLIProvider.
-func NewGeminiCLIProvider(model string) *GeminiCLIProvider {
-	return &GeminiCLIProvider{model: model}
+func NewGeminiCLIProvider(model string, noSession bool) *GeminiCLIProvider {
+	return &GeminiCLIProvider{model: model, noSession: noSession}
 }
 
 // GenerateContent generates content using Gemini CLI.
 func (p *GeminiCLIProvider) GenerateContent(ctx context.Context, systemMessage, userMessage string) (string, Usage, error) {
 	prompt := fmt.Sprintf("System: %s\nUser: %s", systemMessage, userMessage)
-	client := geminicli.NewClient(geminicli.Config{Model: p.model})
+	client := geminicli.NewClient(geminicli.Config{
+		Model:     p.model,
+		NoSession: p.noSession,
+	})
 	resp, err := client.ExecuteDetailed(ctx, prompt)
 	if err != nil {
 		return "", Usage{}, fmt.Errorf("geminicli execution failed: %w", err)
 	}
+// ...
 
 	usage := Usage{
 		PromptTokens:     resp.TokenUsage.Prompt,

@@ -68,6 +68,7 @@ func NewSuggestCmd() *cobra.Command {
 				Temperature: cfg.AI.Temperature,
 				Model:       cfg.AI.Model,
 				OllamaPath:  cfg.Ollama.Path,
+				NoSession:   cfg.AI.NoSession,
 			})
 			if err != nil {
 				cmd.PrintErrln("Error creating AI provider:", err)
