@@ -31,3 +31,9 @@ type Config struct {
 	Temperature float64
 	OllamaPath  string
 }
+
+type Usage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}

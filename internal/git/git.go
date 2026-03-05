@@ -50,7 +50,7 @@ func (s *Service) GetStatusForFiles(files []string) (string, error) {
 	for _, f := range files {
 		if rel, err := s.toRel(f, ctx.root); err == nil {
 			if st, ok := status[rel]; ok {
-				b.WriteString(fmt.Sprintf("%c%c %s\n", formatStatusCode(st.Staging), formatStatusCode(st.Worktree), rel))
+				fmt.Fprintf(&b, "%c%c %s\n", formatStatusCode(st.Staging), formatStatusCode(st.Worktree), rel)
 			}
 		}
 	}
@@ -66,7 +66,7 @@ func (s *Service) GetChangedFiles() ([]string, error) {
 	var changed []string
 	for path, st := range status {
 		if st.Staging != git.Unmodified || st.Worktree != git.Unmodified {
-			changed = append(changed, path)
+			changed = append(changed, filepath.Join(ctx.root, path))
 		}
 	}
 	sort.Strings(changed)
@@ -98,12 +98,16 @@ func (s *Service) GetAmendChangesForFiles(files []string) (string, error) {
 	}
 	filesMap := make(map[string]bool)
 	for _, f := range files {
-		filesMap[f] = true
+		if abs, err := filepath.Abs(f); err == nil {
+			filesMap[abs] = true
+		} else {
+			filesMap[f] = true
+		}
 	}
 	if ctx.head != nil {
 		if ht, err := ctx.head.Tree(); err == nil {
 			_ = ht.Files().ForEach(func(f *object.File) error {
-				filesMap[f.Name] = true
+				filesMap[filepath.Join(ctx.root, f.Name)] = true
 				return nil
 			})
 		}
@@ -143,7 +147,7 @@ func (s *Service) GetFilesInLastCommit() ([]string, error) {
 			name = c.From.Name
 		}
 		if name != "" {
-			files = append(files, name)
+			files = append(files, filepath.Join(ctx.root, name))
 		}
 	}
 	sort.Strings(files)
@@ -182,7 +186,7 @@ func (s *Service) ResolvePath(path string) ([]string, error) {
 		if strings.HasPrefix(rel, "..") {
 			return nil, ErrOutsideRepo
 		}
-		return []string{rel}, nil
+		return []string{abs}, nil
 	}
 
 	status, _ := ctx.worktree.Status()
@@ -199,7 +203,7 @@ func (s *Service) ResolvePath(path string) ([]string, error) {
 	var results []string
 	add := func(p string) {
 		if (prefix == "" || strings.HasPrefix(p, prefix)) && !seen[p] {
-			results = append(results, p)
+			results = append(results, filepath.Join(ctx.root, p))
 			seen[p] = true
 		}
 	}
@@ -324,9 +328,22 @@ func (s *Service) performCommit(files []string, msg string, amend bool) error {
 		return err
 	}
 	for _, f := range files {
-		rel, _ := s.toRel(f, ctx.root)
-		if _, err := ctx.worktree.Add(rel); err != nil {
-			return fmt.Errorf("failed to add file to worktree: %w", err)
+		rel, err := s.toRel(f, ctx.root)
+		if err != nil {
+			return err
+		}
+
+		fullPath := filepath.Join(ctx.root, rel)
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			// If file is deleted, use Remove
+			if _, err := ctx.worktree.Remove(rel); err != nil {
+				return fmt.Errorf("failed to remove deleted file from worktree: %w", err)
+			}
+		} else {
+			// If file exists, use Add
+			if _, err := ctx.worktree.Add(rel); err != nil {
+				return fmt.Errorf("failed to add file to worktree: %w", err)
+			}
 		}
 	}
 	sig := s.getAuthorSignature(ctx.repo)
@@ -501,15 +518,15 @@ func generateDiffString(path, oldText, newText string, isNew, isDel bool) (resul
 	decoded, _ := url.PathUnescape(dmp.PatchToText(patches))
 
 	var bld strings.Builder
-	bld.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", path, path))
+	fmt.Fprintf(&bld, "diff --git a/%s b/%s\n", path, path)
 
 	switch {
 	case isNew:
-		bld.WriteString(fmt.Sprintf("new file mode 100644\n--- /dev/null\n+++ b/%s\n", path))
+		fmt.Fprintf(&bld, "new file mode 100644\n--- /dev/null\n+++ b/%s\n", path)
 	case isDel:
-		bld.WriteString(fmt.Sprintf("deleted file mode 100644\n--- a/%s\n+++ /dev/null\n", path))
+		fmt.Fprintf(&bld, "deleted file mode 100644\n--- a/%s\n+++ /dev/null\n", path)
 	default:
-		bld.WriteString(fmt.Sprintf("--- a/%s\n+++ b/%s\n", path, path))
+		fmt.Fprintf(&bld, "--- a/%s\n+++ b/%s\n", path, path)
 	}
 
 	bld.WriteString(decoded)

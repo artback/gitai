@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,8 +85,8 @@ func TestGetGitRoot_NotFound(t *testing.T) {
 		t.Error("expected error when not in a git repository, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "not a git repository") {
-		t.Errorf("expected 'not a git repository' error, got: %v", err)
+	if !errors.Is(err, ErrNotGitRepository) {
+		t.Errorf("expected ErrNotGitRepository, got: %v", err)
 	}
 }
 
@@ -130,8 +131,13 @@ func TestGetChangedFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content1"), 0o644)
 
 	files, _ := gs.GetChangedFiles()
-	if len(files) != 1 || files[0] != "file1.txt" {
-		t.Errorf("expected [file1.txt], got %v", files)
+	expected, _ := filepath.EvalSymlinks(filepath.Join(dir, "file1.txt"))
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	actual, _ := filepath.EvalSymlinks(files[0])
+	if actual != expected {
+		t.Errorf("expected %s, got %s", expected, actual)
 	}
 
 	w.Add("file1.txt")
@@ -292,10 +298,10 @@ func TestResolvePath(t *testing.T) {
 		path     string
 		expected []string
 	}{
-		{"Single File", "subdir/a.txt", []string{"subdir/a.txt"}},
-		{"Directory", "subdir", []string{"subdir/a.txt", "subdir/b.txt"}},
-		{"Root Dot", ".", []string{"README.md", "root.txt", "subdir/a.txt", "subdir/b.txt"}},
-		{"Non-existent", "missing.txt", []string{"missing.txt"}},
+		{"Single File", "subdir/a.txt", []string{filepath.Join(dir, "subdir/a.txt")}},
+		{"Directory", "subdir", []string{filepath.Join(dir, "subdir/a.txt"), filepath.Join(dir, "subdir/b.txt")}},
+		{"Root Dot", ".", []string{filepath.Join(dir, "README.md"), filepath.Join(dir, "root.txt"), filepath.Join(dir, "subdir/a.txt"), filepath.Join(dir, "subdir/b.txt")}},
+		{"Non-existent", "missing.txt", []string{filepath.Join(dir, "missing.txt")}},
 	}
 
 	for _, tt := range tests {
@@ -310,8 +316,10 @@ func TestResolvePath(t *testing.T) {
 			}
 
 			for i, r := range results {
-				if r != tt.expected[i] {
-					t.Errorf("at index %d: expected %s, got %s", i, tt.expected[i], r)
+				rEval, _ := filepath.EvalSymlinks(r)
+				expectedEval, _ := filepath.EvalSymlinks(tt.expected[i])
+				if rEval != expectedEval {
+					t.Errorf("at index %d: expected %s, got %s", i, expectedEval, rEval)
 				}
 			}
 		})

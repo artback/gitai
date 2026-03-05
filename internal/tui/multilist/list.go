@@ -3,6 +3,7 @@ package multilist
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -35,12 +36,13 @@ func newAdditionalKeyMap() additionalKeyMap {
 // -- Model --
 
 type Item struct {
-	Value    string
-	Selected bool
+	Value        string
+	DisplayValue string
+	Selected     bool
 }
 
-func (i Item) FilterValue() string { return i.Value }
-func (i Item) Title() string       { return i.Value }
+func (i Item) FilterValue() string { return i.DisplayValue }
+func (i Item) Title() string       { return i.DisplayValue }
 func (i Item) Description() string { return "" }
 
 type Model struct {
@@ -101,10 +103,16 @@ func WithSelected(selected []string) Option {
 
 // New creates a list. The default title is empty, the default height is 20.
 // Pass options to override defaults.
-func New(data []string, title string, opts ...Option) Model {
+func New(data []string, title string, cwd string, opts ...Option) Model {
 	items := make([]list.Item, len(data))
 	for i, v := range data {
-		items[i] = Item{Value: v, Selected: false}
+		display := v
+		if cwd != "" && filepath.IsAbs(v) {
+			if rel, err := filepath.Rel(cwd, v); err == nil {
+				display = rel
+			}
+		}
+		items[i] = Item{Value: v, DisplayValue: display, Selected: false}
 	}
 
 	l := list.New(items, delegate{}, 40, 20)
@@ -267,7 +275,7 @@ func (d delegate) Render(w io.Writer, m list.Model, index int, listItem list.Ite
 		checked = "[x]"
 	}
 
-	str := fmt.Sprintf("%s %s", checked, i.Value)
+	str := fmt.Sprintf("%s %s", checked, i.DisplayValue)
 
 	if index == m.Index() {
 		fmt.Fprint(w, shared.SelectedStyle.Render("> "+str))

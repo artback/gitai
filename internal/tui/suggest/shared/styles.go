@@ -28,4 +28,5 @@ var (
 
 	NormalTextStyle   = lipgloss.NewStyle().Foreground(BaseFg)
 	SelectedTextStyle = SelectedStyle
+	DimStyle          = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#909090", Dark: "#6272a4"})
 )

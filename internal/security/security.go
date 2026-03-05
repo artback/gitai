@@ -1,6 +1,7 @@
 package security
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -16,6 +17,10 @@ type Finding struct {
 	Line int
 	Text string
 }
+
+var (
+	ErrSensitiveDataFound = errors.New("sensitive data found")
+)
 
 // CheckDiffSafety scans a diff for sensitive keywords in added lines.
 // It is designed to be resilient to different diff formats.
@@ -58,7 +63,7 @@ func CheckDiffSafety(diffText string, keywords []string) error {
 		return nil
 	}
 
-	return formatFindings(findings)
+	return fmt.Errorf("%w:\n%s", ErrSensitiveDataFound, formatFindings(findings))
 }
 
 func parseStartLine(header string) int {
@@ -71,7 +76,7 @@ func parseStartLine(header string) int {
 	return 0
 }
 
-func formatFindings(findings []Finding) error {
+func formatFindings(findings []Finding) string {
 	var builder strings.Builder
 	currentDir, _ := os.Getwd()
 
@@ -85,10 +90,10 @@ func formatFindings(findings []Finding) error {
 		}
 		// Create file:// URI for clickable terminal links
 		fileURL := url.URL{Scheme: "file", Path: absPath}
-		builder.WriteString(fmt.Sprintf("- %s:%d:1: %s\n", fileURL.String(), find.Line, find.Text))
+		fmt.Fprintf(&builder, "- %s:%d:1: %s\n", fileURL.String(), find.Line, find.Text)
 	}
 
-	return fmt.Errorf("sensitive data found:\n%s", builder.String())
+	return builder.String()
 }
 
 func containsKeyword(line string, keywords []string) bool {

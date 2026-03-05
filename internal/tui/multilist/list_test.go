@@ -8,7 +8,7 @@ import (
 
 func TestModel(t *testing.T) {
 	data := []string{"file1.go", "file2.go", "README.md"}
-	m := New(data, "Select Files")
+	m := New(data, "Select Files", "")
 
 	// 1. Check Initial State
 	if len(m.List.Items()) != 3 {
@@ -49,7 +49,7 @@ func TestModel(t *testing.T) {
 
 func TestModel_NavigationAndToggle(t *testing.T) {
 	data := []string{"item1", "item2", "item3"}
-	m := New(data, "Nav Test")
+	m := New(data, "Nav Test", "")
 
 	// 1. Move down to "item2"
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -76,7 +76,7 @@ func TestModel_NavigationAndToggle(t *testing.T) {
 
 func TestModel_Options(t *testing.T) {
 	data := []string{"A"}
-	m := New(data, "Options Test", WithHeight(50), WithWidth(80), WithStatusBar(true))
+	m := New(data, "Options Test", "", WithHeight(50), WithWidth(80), WithStatusBar(true))
 
 	if m.List.Height() != 50 {
 		t.Errorf("expected height 50, got %d", m.List.Height())
@@ -149,7 +149,7 @@ func TestRegexFilter(t *testing.T) {
 
 func TestModel_Filtering(t *testing.T) {
 	data := []string{"abc", "def", "ghi"}
-	m := New(data, "Test")
+	m := New(data, "Test", "")
 
 	// Enter filtering mode
 	m.List.SetFilterState(1) // list.Filtering
