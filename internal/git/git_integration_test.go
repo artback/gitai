@@ -231,8 +231,8 @@ func TestGetChangesForFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("hello"), 0o644)
 
 	diff, _ := gs.GetChangesForFiles([]string{"new.txt"})
-	if !strings.Contains(diff, "--- new.txt") {
-		t.Error("expected new file diff with simplified header")
+	if !strings.Contains(diff, "+++ b/new.txt") {
+		t.Error("expected new file diff with git header")
 	}
 
 	w.Add("new.txt")

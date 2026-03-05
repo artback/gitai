@@ -328,7 +328,7 @@ func (s *Service) diffFile(rel, full string, oldTree *object.Tree) string {
 	if len(oldText) > MaxDiffSize || len(newText) > MaxDiffSize {
 		return fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\nBinary files or large files differ\n", rel, rel, rel, rel)
 	}
-	return generateDiffString(rel, oldText, newText)
+	return generateDiffString(rel, oldText, newText, isNew, isDel)
 }
 
 // --- Git Commands ---
@@ -520,7 +520,7 @@ func normalizeGitURL(rawURL string) string {
 	return u
 }
 
-func generateDiffString(path, oldText, newText string) (result string) {
+func generateDiffString(path, oldText, newText string, isNew, isDel bool) (result string) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = fmt.Sprintf("diff --git a/%s b/%s\n(Diff failed: %v)\n", path, path, r)

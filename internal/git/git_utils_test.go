@@ -115,6 +115,8 @@ func TestGenerateDiffString(t *testing.T) {
 		path     string
 		oldText  string
 		newText  string
+		isNew    bool
+		isDel    bool
 		contains []string
 	}{
 		{
@@ -122,27 +124,33 @@ func TestGenerateDiffString(t *testing.T) {
 			"main.go",
 			"",
 			"package main",
-			[]string{"--- main.go", "package main"},
+			true,
+			false,
+			[]string{"--- /dev/null", "+++ b/main.go", "package main"},
 		},
 		{
 			"Modified File",
 			"README.md",
 			"Hello",
 			"Hello World",
-			[]string{"--- README.md", "Hello", "World"},
+			false,
+			false,
+			[]string{"--- a/README.md", "+++ b/README.md", "Hello", "World"},
 		},
 		{
 			"Deleted File",
 			"old.txt",
 			"content",
 			"",
-			[]string{"--- old.txt", "content"},
+			false,
+			true,
+			[]string{"--- a/old.txt", "+++ /dev/null", "content"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := generateDiffString(tt.path, tt.oldText, tt.newText)
+			result := generateDiffString(tt.path, tt.oldText, tt.newText, tt.isNew, tt.isDel)
 			for _, s := range tt.contains {
 				if !strings.Contains(result, s) {
 					t.Errorf("Expected result to contain %q\nResult:\n%s", s, result)
