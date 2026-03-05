@@ -230,8 +230,21 @@ func (c *Client) parseDetailedOutput(output []byte) (*DetailedResponse, error) {
 		return nil, ErrEmptyOutput
 	}
 
+	// Find the start of the JSON object
+	start := strings.Index(string(output), "{")
+	if start == -1 {
+		return nil, fmt.Errorf("%w: invalid JSON start: %s", ErrParseOutput, string(output))
+	}
+	
+	// Find the end of the JSON object
+	end := strings.LastIndex(string(output), "}")
+	if end == -1 || end < start {
+		return nil, fmt.Errorf("%w: invalid JSON end", ErrParseOutput)
+	}
+
+	jsonContent := output[start : end+1]
 	var jr jsonResponse
-	if err := json.Unmarshal(output, &jr); err != nil {
+	if err := json.Unmarshal(jsonContent, &jr); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrParseOutput, err)
 	}
 

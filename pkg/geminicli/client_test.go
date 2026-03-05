@@ -130,6 +130,37 @@ func TestParseDetailedOutput(t *testing.T) {
 	}
 }
 
+// TestParseDetailedOutput_Resilience tests extraction from noisy output
+func TestParseDetailedOutput_Resilience(t *testing.T) {
+	client := NewClient()
+	noisyIn := []byte(`Loaded cached credentials.
+{
+  "response": "Hello with noise",
+  "stats": {
+    "models": {
+      "gemini-3-flash-preview": {
+        "tokens": {
+          "total": 100
+        }
+      }
+    }
+  }
+}
+Some trailing noise.`)
+
+	resp, err := client.parseDetailedOutput(noisyIn)
+	if err != nil {
+		t.Fatalf("parseDetailedOutput failed: %v", err)
+	}
+
+	if resp.Response != "Hello with noise" {
+		t.Errorf("Expected 'Hello with noise', got '%s'", resp.Response)
+	}
+	if resp.TokenUsage.Total != 100 {
+		t.Errorf("Expected 100 tokens, got %d", resp.TokenUsage.Total)
+	}
+}
+
 // TestDetectAuthError tests authentication error detection
 func TestDetectAuthError(t *testing.T) {
 	client := NewClient()
