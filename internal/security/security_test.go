@@ -1,6 +1,7 @@
 package security
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -17,6 +18,10 @@ func TestCheckDiffSafety_Absolute(t *testing.T) {
 	err := CheckDiffSafety(diff, keywords)
 	if err == nil {
 		t.Error("expected error for absolute path diff containing secret, but got nil")
+	}
+
+	if !errors.Is(err, ErrSensitiveDataFound) {
+		t.Errorf("expected ErrSensitiveDataFound, got: %v", err)
 	}
 }
 
@@ -110,8 +115,13 @@ diff --git b/b.go b/b.go
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error but got nil")
-				} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
+				} else {
+					if !errors.Is(err, ErrSensitiveDataFound) {
+						t.Errorf("expected ErrSensitiveDataFound, got: %v", err)
+					}
+					if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+						t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
+					}
 				}
 			} else {
 				if err != nil {

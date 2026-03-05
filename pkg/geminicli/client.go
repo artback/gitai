@@ -31,6 +31,7 @@ var (
 	ErrEmptyOutput        = errors.New("empty output from Gemini command")
 	ErrAuthFailed         = errors.New("authentication error: please check your Gemini API credentials")
 	ErrServiceUnavailable = errors.New("service unavailable: Gemini API is currently overloaded or down")
+	ErrNoSessionFound     = errors.New("no previous sessions found")
 )
 
 // TokenUsage represents token usage statistics
@@ -145,11 +146,31 @@ func (c *Client) ExecuteDetailed(ctx context.Context, prompt string) (*DetailedR
 				if c.isRetryableError(stderr) {
 					return ErrServiceUnavailable
 				}
+				// If session resumption failed, retry without the resume flag
+				if c.isNoSessionError(stderr) {
+					c.logger.DebugWith("No previous session found, retrying without resume flag")
+					fallbackArgs := []string{
+						GeminiModelFlag, c.model,
+						"-o", "json",
+						GeminiPromptFlag, resolvedPrompt,
+					}
+					fallbackCmd := exec.CommandContext(ctx, geminiPath, fallbackArgs...)
+					c.setupCommandDir(fallbackCmd)
+					output, err = fallbackCmd.Output()
+					if err != nil {
+						if errors.As(err, &exitErr) {
+							return fmt.Errorf("%w: %s", ErrCommandFailed, string(exitErr.Stderr))
+						}
+						return fmt.Errorf("%w: %w", ErrCommandFailed, err)
+					}
+					goto parse
+				}
 				return fmt.Errorf("%w: %s", ErrCommandFailed, stderr)
 			}
 			return fmt.Errorf("%w: %w", ErrCommandFailed, err)
 		}
 
+	parse:
 		res, err := c.parseDetailedOutput(output)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrParseOutput, err)
@@ -177,6 +198,10 @@ func (c *Client) setupCommandDir(cmd *exec.Cmd) {
 func (c *Client) isRetryableError(stderr string) bool {
 	lower := strings.ToLower(stderr)
 	return strings.Contains(lower, "service unavailable") || strings.Contains(lower, "overloaded")
+}
+
+func (c *Client) isNoSessionError(stderr string) bool {
+	return strings.Contains(stderr, "No previous sessions found")
 }
 
 func (c *Client) detectAuthError(stderr string) bool {

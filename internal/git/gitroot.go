@@ -8,6 +8,10 @@ import (
 	"github.com/go-git/go-git/v6"
 )
 
+var (
+	ErrNotGitRepository = errors.New("not a git repository")
+)
+
 // GetGitRoot returns the absolute path to the repository root.
 func GetGitRoot() (string, error) {
 	return findGitRoot(".")
@@ -28,7 +32,7 @@ func findGitRoot(startPath string) (string, error) {
 
 		parent := filepath.Dir(path)
 		if parent == path {
-			return "", errors.New("not a git repository")
+			return "", ErrNotGitRepository
 		}
 
 		path = parent

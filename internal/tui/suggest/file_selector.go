@@ -89,7 +89,7 @@ func (m *FileSelectorModel) View() string {
 		b.WriteString(shared.HeaderStyle.Render("Selected files:") + "\n")
 
 		for _, f := range m.GetSelectedFiles() {
-			b.WriteString(fmt.Sprintf(" - %s\n", f))
+			fmt.Fprintf(&b, " - %s\n", f)
 		}
 
 		return b.String()

@@ -200,3 +200,55 @@ func TestResolveRelativePaths(t *testing.T) {
 		})
 	}
 }
+
+// TestExecuteWithNoSessionFallback tests the session fallback logic
+func TestExecuteWithNoSessionFallback(t *testing.T) {
+	// Setup a mock gemini command
+	tmpDir, err := os.MkdirTemp("", "gemini-mock-session")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mockPath := filepath.Join(tmpDir, "gemini")
+
+	// This mock script will fail if -r latest is passed, but succeed otherwise.
+	// It simulates the "No previous sessions found" error.
+	mockContent := `#!/bin/bash
+has_resume=false
+for arg in "$@"; do
+    if [ "$arg" == "-r" ]; then
+        has_resume=true
+    fi
+done
+
+if [ "$has_resume" = true ]; then
+    echo "Error resuming session: No previous sessions found for this project." >&2
+    exit 1
+else
+    echo '{"response": "Fallback Response", "stats": {"models": {"gemini-3-flash-preview": {"tokens": {"total": 10}}}}}'
+fi
+`
+	if err := os.WriteFile(mockPath, []byte(mockContent), 0755); err != nil {
+		t.Fatalf("Failed to create mock gemini: %v", err)
+	}
+
+	// Update PATH to include our mock
+	originalPath := os.Getenv("PATH")
+	os.Setenv("PATH", tmpDir+string(os.PathListSeparator)+originalPath)
+	defer os.Setenv("PATH", originalPath)
+
+	client := NewClient()
+	ctx := context.Background()
+
+	// ExecuteDetailed should try with -r latest first, fail, and then try without it.
+	resp, err := client.ExecuteDetailed(ctx, "test prompt")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if resp.Response != "Fallback Response" {
+		t.Errorf("Expected 'Fallback Response', got '%s'", resp.Response)
+	}
+}
+

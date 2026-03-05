@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,8 +85,8 @@ func TestGetGitRoot_NotFound(t *testing.T) {
 		t.Error("expected error when not in a git repository, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "not a git repository") {
-		t.Errorf("expected 'not a git repository' error, got: %v", err)
+	if !errors.Is(err, ErrNotGitRepository) {
+		t.Errorf("expected ErrNotGitRepository, got: %v", err)
 	}
 }
 

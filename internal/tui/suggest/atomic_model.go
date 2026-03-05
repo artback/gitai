@@ -324,10 +324,10 @@ func (m *AtomicModel) View() string {
 				style = shared.SelectedTextStyle
 			}
 
-			b.WriteString(fmt.Sprintf("%s %d. %s\n", cursor, i+1, style.Render(c.Message)))
+			fmt.Fprintf(&b, "%s %d. %s\n", cursor, i+1, style.Render(c.Message))
 			for _, hid := range c.HunkIDs {
 				if h, ok := m.hunkMap[hid]; ok {
-					b.WriteString(fmt.Sprintf("      - %s (lines %d-%d)\n", h.File, h.StartLine, h.EndLine))
+					fmt.Fprintf(&b, "      - %s (lines %d-%d)\n", h.File, h.StartLine, h.EndLine)
 				}
 			}
 			b.WriteString("\n")

@@ -66,7 +66,7 @@ func (s *Service) GetStatusForFiles(files []string) (string, error) {
 	for _, f := range files {
 		if rel, err := s.toRel(f, ctx.root); err == nil {
 			if st, ok := status[rel]; ok {
-				b.WriteString(fmt.Sprintf("%c%c %s\n", formatStatusCode(st.Staging), formatStatusCode(st.Worktree), rel))
+				fmt.Fprintf(&b, "%c%c %s\n", formatStatusCode(st.Staging), formatStatusCode(st.Worktree), rel)
 			}
 		}
 	}
@@ -521,7 +521,7 @@ func generateDiffString(path, oldText, newText string) (result string) {
 	decoded = hunkHeaderRegex.ReplaceAllString(decoded, "")
 
 	var bld strings.Builder
-	bld.WriteString(fmt.Sprintf("--- %s\n", path))
+	fmt.Fprintf(&bld, "--- %s\n", path)
 
 	bld.WriteString(decoded)
 	return bld.String()
