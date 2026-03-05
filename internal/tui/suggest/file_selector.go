@@ -2,6 +2,7 @@ package suggest
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -30,10 +31,13 @@ func NewFileSelectorModel(files []string, preSelectedFiles ...string) FileSelect
 		opts = append(opts, multilist.WithSelected(preSelectedFiles))
 	}
 
+	cwd, _ := os.Getwd()
+
 	return FileSelectorModel{
 		MultiList: multilist.New(
 			files,
 			"Select files to include in commit",
+			cwd,
 			opts...,
 		),
 		quitting: false,
@@ -89,7 +93,7 @@ func (m *FileSelectorModel) View() string {
 		b.WriteString(shared.HeaderStyle.Render("Selected files:") + "\n")
 
 		for _, f := range m.GetSelectedFiles() {
-			b.WriteString(fmt.Sprintf(" - %s\n", f))
+			fmt.Fprintf(&b, " - %s\n", f)
 		}
 
 		return b.String()

@@ -457,9 +457,8 @@ func (m *AIMessageModel) View() string {
 		b.WriteString(m.commitMessage + "\n")
 
 		if m.config.Verbose && m.usage.TotalTokens > 0 {
-			usageStr := fmt.Sprintf("\nTokens: %d (prompt) + %d (completion) = %d (total)",
+			fmt.Fprintf(&b, "\nTokens: %d (prompt) + %d (completion) = %d (total)\n",
 				m.usage.PromptTokens, m.usage.CompletionTokens, m.usage.TotalTokens)
-			b.WriteString(shared.DimStyle.Render(usageStr) + "\n")
 		}
 
 		b.WriteString("\n[e] Edit   [r] Regenerate   [c] Commit   [x] Cancel\n")

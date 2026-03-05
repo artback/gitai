@@ -4,13 +4,6 @@ import (
 	"context"
 )
 
-// Usage represents token usage statistics.
-type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-}
-
 // AIProvider defines the interface for underlying AI services.
 type AIProvider interface {
 	GenerateContent(ctx context.Context, systemMessage, userMessage string) (string, Usage, error)
@@ -26,7 +19,7 @@ func NewAIProvider(p Provider, cfg Config) (AIProvider, error) {
 	case ProviderOllama:
 		return NewOllamaProvider(cfg.OllamaPath, cfg.Model), nil
 	case ProvideGeminiCLI:
-		return NewGeminiCLIProvider(cfg.Model), nil
+		return NewGeminiCLIProvider(cfg.Model, cfg.NoSession), nil
 	case ProviderAnthropic:
 		return NewAnthropicProvider(cfg.APIKey, int(cfg.MaxTokens), cfg.Temperature, cfg.Model), nil
 	case ProviderGroq:

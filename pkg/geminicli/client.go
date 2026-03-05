@@ -31,6 +31,7 @@ var (
 	ErrEmptyOutput        = errors.New("empty output from Gemini command")
 	ErrAuthFailed         = errors.New("authentication error: please check your Gemini API credentials")
 	ErrServiceUnavailable = errors.New("service unavailable: Gemini API is currently overloaded or down")
+	ErrNoSessionFound     = errors.New("no previous sessions found")
 )
 
 // TokenUsage represents token usage statistics
@@ -54,6 +55,7 @@ type Client struct {
 	logger           Logger
 	model            string
 	workingDirectory string
+	noSession        bool
 }
 
 // Config represents configuration options for the client
@@ -61,6 +63,7 @@ type Config struct {
 	Logger           Logger
 	Model            string
 	WorkingDirectory string
+	NoSession        bool
 }
 
 // NewClient creates a new Gemini CLI client
@@ -81,6 +84,7 @@ func NewClient(config ...Config) *Client {
 		if cfg.WorkingDirectory != "" {
 			client.workingDirectory = cfg.WorkingDirectory
 		}
+		client.noSession = cfg.NoSession
 	}
 
 	return client
@@ -113,13 +117,18 @@ func (c *Client) ExecuteDetailed(ctx context.Context, prompt string) (*DetailedR
 		}
 	}
 
-	// Use JSON output format to get stats and resume latest session to save tokens
+	// Initial command args
 	cmdArgs := []string{
 		GeminiModelFlag, c.model,
-		GeminiResumeFlag, GeminiResumeValue,
 		"-o", "json",
 		GeminiPromptFlag, resolvedPrompt,
 	}
+
+	// Resume latest session to save tokens unless disabled
+	if !c.noSession {
+		cmdArgs = append([]string{GeminiResumeFlag, GeminiResumeValue}, cmdArgs...)
+	}
+
 	var detailedResp *DetailedResponse
 
 	retryer := &Retryer{
@@ -145,14 +154,34 @@ func (c *Client) ExecuteDetailed(ctx context.Context, prompt string) (*DetailedR
 				if c.isRetryableError(stderr) {
 					return ErrServiceUnavailable
 				}
+				// If session resumption failed, retry without the resume flag
+				if c.isNoSessionError(stderr) {
+					c.logger.DebugWith("No previous session found, retrying without resume flag")
+					fallbackArgs := []string{
+						GeminiModelFlag, c.model,
+						"-o", "json",
+						GeminiPromptFlag, resolvedPrompt,
+					}
+					fallbackCmd := exec.CommandContext(ctx, geminiPath, fallbackArgs...)
+					c.setupCommandDir(fallbackCmd)
+					output, err = fallbackCmd.Output()
+					if err != nil {
+						if errors.As(err, &exitErr) {
+							return fmt.Errorf("%w: %s", ErrCommandFailed, string(exitErr.Stderr))
+						}
+						return fmt.Errorf("%w: %w", ErrCommandFailed, err)
+					}
+					goto parse
+				}
 				return fmt.Errorf("%w: %s", ErrCommandFailed, stderr)
 			}
 			return fmt.Errorf("%w: %w", ErrCommandFailed, err)
 		}
 
+	parse:
 		res, err := c.parseDetailedOutput(output)
 		if err != nil {
-			return fmt.Errorf("%w: %w", ErrParseOutput, err)
+			return err
 		}
 
 		detailedResp = res
@@ -177,6 +206,10 @@ func (c *Client) setupCommandDir(cmd *exec.Cmd) {
 func (c *Client) isRetryableError(stderr string) bool {
 	lower := strings.ToLower(stderr)
 	return strings.Contains(lower, "service unavailable") || strings.Contains(lower, "overloaded")
+}
+
+func (c *Client) isNoSessionError(stderr string) bool {
+	return strings.Contains(stderr, "No previous sessions found")
 }
 
 func (c *Client) detectAuthError(stderr string) bool {
@@ -205,8 +238,21 @@ func (c *Client) parseDetailedOutput(output []byte) (*DetailedResponse, error) {
 		return nil, ErrEmptyOutput
 	}
 
+	// Find the start of the JSON object
+	start := strings.Index(string(output), "{")
+	if start == -1 {
+		return nil, fmt.Errorf("%w: invalid JSON start: %s", ErrParseOutput, string(output))
+	}
+
+	// Find the end of the JSON object
+	end := strings.LastIndex(string(output), "}")
+	if end == -1 || end < start {
+		return nil, fmt.Errorf("%w: invalid JSON end", ErrParseOutput)
+	}
+
+	jsonContent := output[start : end+1]
 	var jr jsonResponse
-	if err := json.Unmarshal(output, &jr); err != nil {
+	if err := json.Unmarshal(jsonContent, &jr); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrParseOutput, err)
 	}
 
@@ -276,3 +322,52 @@ func (c *Client) resolveRelativePaths(prompt string, baseDir string) string {
 		return cleanPath
 	})
 }
+
+// ValidateAvailable checks if Gemini command is available
+func (c *Client) ValidateAvailable() error {
+	if _, err := exec.LookPath(GeminiCommand); err != nil {
+		return fmt.Errorf("%w: %w", ErrCommandNotFound, err)
+	}
+	return nil
+}
+
+// Convenience functions for backward compatibility
+
+// Execute executes a Gemini command with the given prompt using default client
+func Execute(ctx context.Context, prompt string) (string, error) {
+	client := NewClient()
+	return client.Execute(ctx, prompt)
+}
+
+// BuildGeminiCommand builds the command arguments for Gemini
+func BuildGeminiCommand(prompt string) []string {
+	// Note: this is simplified as it doesn't know about model or resume flags from a client instance
+	return []string{GeminiCommand, GeminiPromptFlag, prompt}
+}
+
+// ParseGeminiOutput parses the output from Gemini command
+func ParseGeminiOutput(output []byte) (string, error) {
+	client := NewClient()
+	resp, err := client.parseDetailedOutput(output)
+	if err != nil {
+		return "", err
+	}
+	return resp.Response, nil
+}
+
+// DetectAuthError detects authentication-related errors in command output
+func DetectAuthError(output []byte) bool {
+	client := NewClient()
+	return client.detectAuthError(string(output))
+}
+
+// ExecuteWithTimeout is kept for signature compatibility but uses the context-based Execute
+func (c *Client) ExecuteWithTimeout(ctx context.Context, prompt string, _ interface{}) (string, error) {
+	return c.Execute(ctx, prompt)
+}
+
+// ExecuteWithTimeout package level function
+func ExecuteWithTimeout(ctx context.Context, prompt string, _ interface{}) (string, error) {
+	return Execute(ctx, prompt)
+}
+

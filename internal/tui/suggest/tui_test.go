@@ -19,7 +19,7 @@ type mockGenerator struct {
 }
 
 func (m *mockGenerator) Generate(ctx context.Context, _, _, _, _ string) (string, provider.Usage, error) {
-	return m.response, provider.Usage{}, m.err
+	return m.response, provider.Usage{TotalTokens: 10}, m.err
 }
 
 // mockMessageService implements ONLY messageGitService interface

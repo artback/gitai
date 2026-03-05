@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"huseynovvusal/gitai/internal/ai/provider"
 	"strings"
+
+	"huseynovvusal/gitai/internal/ai/provider"
 )
 
 // AtomicCommit represents a suggested split commit.
@@ -62,7 +63,7 @@ func (s *Service) GenerateAtomic(ctx context.Context, hunksInput string, hint st
 
 	var commits []AtomicCommit
 	if err := json.Unmarshal([]byte(cleanResp), &commits); err != nil {
-		return nil, usage, fmt.Errorf("failed to parse AI response: %w\nResponse: %s", err, resp)
+		return nil, provider.Usage{}, fmt.Errorf("failed to parse AI response: %w\nResponse: %s", err, resp)
 	}
 
 	return commits, usage, nil

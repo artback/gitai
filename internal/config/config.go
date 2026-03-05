@@ -25,6 +25,7 @@ type AIConfig struct {
 	Temperature float64 `mapstructure:"temperature"`
 	MaxTokens   int64   `mapstructure:"max_tokens"`
 	DebugFile   string  `mapstructure:"debug_file"`
+	NoSession   bool    `mapstructure:"no_session"`
 }
 
 type SuggestConfig struct {
