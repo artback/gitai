@@ -222,8 +222,8 @@ func TestAIMessageModel_States(t *testing.T) {
 	m2, _ := m.Update(aiDoneMsg{message: "feat: add tests", usage: provider.Usage{TotalTokens: 10}})
 
 	m = *m2.(*AIMessageModel)
-	if m.state != StateGenerated || m.commitMessage != "feat: add tests" {
-		t.Errorf("state mismatch after aiDoneMsg: %v", m.state)
+	if m.state != StateGenerated || m.commitMessage != "feat: add tests" || m.usage.TotalTokens != 10 {
+		t.Errorf("state/usage mismatch after aiDoneMsg: %v, tokens=%d", m.state, m.usage.TotalTokens)
 	}
 
 	if !strings.Contains(m.View(), "AI commit message suggestion") {

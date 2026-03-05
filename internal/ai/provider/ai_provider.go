@@ -4,6 +4,13 @@ import (
 	"context"
 )
 
+// Usage represents token usage statistics.
+type Usage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
 // AIProvider defines the interface for underlying AI services.
 type AIProvider interface {
 	GenerateContent(ctx context.Context, systemMessage, userMessage string) (string, Usage, error)

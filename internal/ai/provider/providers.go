@@ -215,6 +215,7 @@ type GeminiCLIProvider struct {
 // NewGeminiCLIProvider creates a new GeminiCLIProvider.
 func NewGeminiCLIProvider(model string, noSession bool) *GeminiCLIProvider {
 	return &GeminiCLIProvider{model: model, noSession: noSession}
+
 }
 
 // GenerateContent generates content using Gemini CLI.
