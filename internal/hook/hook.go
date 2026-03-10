@@ -148,7 +148,7 @@ func readFileIfExists(path string) (string, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
 		}
-		return "", err
+		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 	return string(data), nil
 }

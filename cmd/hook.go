@@ -32,7 +32,7 @@ The hook respects existing prepare-commit-msg hooks by appending
 rather than overwriting. Set GITAI_SKIP_HOOK=1 to bypass the hook.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := hook.Install(); err != nil {
-				return err
+				return fmt.Errorf("install hook: %w", err)
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "gitai hook installed successfully.")
 			fmt.Fprintln(cmd.OutOrStdout(), "Commit messages will be generated automatically when you run 'git commit'.")
@@ -49,7 +49,7 @@ func newHookUninstallCmd() *cobra.Command {
 		Long:  `Remove the gitai snippet from the prepare-commit-msg hook. Other hook content is preserved.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := hook.Uninstall(); err != nil {
-				return err
+				return fmt.Errorf("uninstall hook: %w", err)
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "gitai hook uninstalled successfully.")
 			return nil
@@ -64,7 +64,7 @@ func newHookStatusCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			installed, err := hook.IsInstalled()
 			if err != nil {
-				return err
+				return fmt.Errorf("check hook status: %w", err)
 			}
 			if installed {
 				fmt.Fprintln(cmd.OutOrStdout(), "gitai hook is installed.")

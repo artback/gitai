@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -199,10 +200,14 @@ func installTo(hookPath string) error {
 	content += "\n" + hookScript()
 
 	if err := os.MkdirAll(filepath.Dir(hookPath), 0o755); err != nil {
-		return err
+		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
-	return os.WriteFile(hookPath, []byte(content), 0o755)
+	if err := os.WriteFile(hookPath, []byte(content), 0o755); err != nil {
+		return fmt.Errorf("failed to write hook file: %w", err)
+	}
+
+	return nil
 }
 
 func uninstallFrom(hookPath string) error {
@@ -220,10 +225,18 @@ func uninstallFrom(hookPath string) error {
 
 	trimmed := trim(cleaned)
 	if trimmed == "#!/bin/sh" || trimmed == "#!/bin/bash" || trimmed == "" {
-		return os.Remove(hookPath)
+		if err := os.Remove(hookPath); err != nil {
+			return fmt.Errorf("failed to remove hook file: %w", err)
+		}
+
+		return nil
 	}
 
-	return os.WriteFile(hookPath, []byte(cleaned), 0o755)
+	if err := os.WriteFile(hookPath, []byte(cleaned), 0o755); err != nil {
+		return fmt.Errorf("failed to write hook file: %w", err)
+	}
+
+	return nil
 }
 
 func contains(s, substr string) bool {
