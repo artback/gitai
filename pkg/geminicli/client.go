@@ -17,7 +17,7 @@ const (
 	GeminiPromptFlag = "-p"
 	GeminiModelFlag  = "-m"
 	DefaultTimeout   = 30 * time.Second
-	DefaultModel     = "gemini-3-flash"
+	DefaultModel     = "gemini-3-flash-preview"
 	MaxRetries       = 3
 
 	ErrEmptyPrompt        = "prompt cannot be empty"
@@ -115,7 +115,7 @@ func (c *Client) Execute(prompt string) (string, error) {
 	geminiPath, err := exec.LookPath(cmdArgs[0])
 	if err != nil {
 		c.logger.ErrorWith("Failed to find gemini command", "error", err)
-		return "", fmt.Errorf("gemini command not found: %w", err)
+		return "", fmt.Errorf("%s: %w", ErrCommandFailed, err)
 	}
 
 	c.logger.DebugWith("Using gemini path", "path", geminiPath)
@@ -190,7 +190,7 @@ func (c *Client) ExecuteWithTimeout(prompt string, timeout time.Duration) (strin
 	geminiPath, err := exec.LookPath(cmdArgs[0])
 	if err != nil {
 		c.logger.ErrorWith("Failed to find gemini command", "error", err)
-		return "", fmt.Errorf("gemini command not found: %w", err)
+		return "", fmt.Errorf("%s: %w", ErrCommandFailed, err)
 	}
 
 	c.logger.DebugWith("Using gemini path", "path", geminiPath)
