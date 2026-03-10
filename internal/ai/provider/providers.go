@@ -402,10 +402,9 @@ func NewClaudeCLIProvider(model string) *ClaudeCLIProvider {
 
 // GenerateContent generates content using the Claude Code CLI.
 func (p *ClaudeCLIProvider) GenerateContent(_ context.Context, systemMessage, userMessage string) (string, Usage, error) {
-	prompt := fmt.Sprintf("System: %s\nUser: %s", systemMessage, userMessage)
 	cfg := claudecli.Config{Model: p.model}
 	client := claudecli.NewClientWithConfig(cfg)
-	resp, err := client.Execute(prompt)
+	resp, err := client.ExecuteWithSystemPrompt(systemMessage, userMessage)
 	if err != nil {
 		return "", Usage{}, fmt.Errorf("claudecli execution failed: %w", err)
 	}
