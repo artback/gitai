@@ -78,7 +78,7 @@ func (s *Service) Stream(ctx context.Context, diff string, status string, hint s
 
 	stream, err := s.provider.StreamContent(ctx, sysMsg, userMessage)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to start stream: %w", err)
 	}
 
 	out := make(chan provider.StreamResult)

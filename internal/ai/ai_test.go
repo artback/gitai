@@ -24,8 +24,8 @@ func (m *MockProvider) GenerateContent(ctx context.Context, systemMessage, userM
 	return "", provider.Usage{}, nil
 }
 
-func (m *MockProvider) StreamContent(ctx context.Context, systemMessage, userMessage string) (<-chan provider.StreamResult, error) {
-	return nil, nil
+func (m *MockProvider) StreamContent(_ context.Context, _, _ string) (<-chan provider.StreamResult, error) {
+	return nil, errors.New("not supported")
 }
 
 // Test that errors from provider propagate (e.g., ErrNoResponse).

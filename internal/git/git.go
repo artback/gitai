@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -43,8 +42,6 @@ var ignoredFiles = map[string]bool{
 	"poetry.lock":       true,
 	"uv.lock":           true,
 }
-
-var hunkHeaderRegex = regexp.MustCompile(`(?m)^@@\s.*\s@@\n`)
 
 type Service struct {
 	useNativeGit bool

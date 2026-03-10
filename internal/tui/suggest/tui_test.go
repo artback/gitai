@@ -2,6 +2,7 @@ package suggest
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -22,8 +23,8 @@ func (m *mockGenerator) Generate(ctx context.Context, _, _, _, _ string) (string
 	return m.response, provider.Usage{}, m.err
 }
 
-func (m *mockGenerator) Stream(ctx context.Context, _, _, _, _ string) (<-chan provider.StreamResult, error) {
-	return nil, nil
+func (m *mockGenerator) Stream(_ context.Context, _, _, _, _ string) (<-chan provider.StreamResult, error) {
+	return nil, errors.New("not supported")
 }
 
 // mockMessageService implements ONLY messageGitService interface
