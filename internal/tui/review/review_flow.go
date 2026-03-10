@@ -234,7 +234,7 @@ func FormatPlain(result *ai.ReviewResult) string {
 func FormatJSON(result *ai.ReviewResult) (string, error) {
 	data, err := json.MarshalIndent(result.Findings, "", "  ")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal findings: %w", err)
 	}
 	return string(data), nil
 }

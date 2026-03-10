@@ -342,11 +342,6 @@ func TestConvenienceExecuteWithTimeout(t *testing.T) {
 // TestNewClient tests client creation
 func TestNewClient(t *testing.T) {
 	client := NewClient()
-
-	if client == nil {
-		t.Error("NewClient should return a valid client")
-	}
-
 	if client.timeout != DefaultTimeout {
 		t.Errorf("Expected default timeout %v, got %v", DefaultTimeout, client.timeout)
 	}
@@ -363,11 +358,6 @@ func TestNewClientWithConfig(t *testing.T) {
 	}
 
 	client := NewClientWithConfig(config)
-
-	if client == nil {
-		t.Error("NewClientWithConfig should return a valid client")
-	}
-
 	if client.timeout != customTimeout {
 		t.Errorf("Expected custom timeout %v, got %v", customTimeout, client.timeout)
 	}
