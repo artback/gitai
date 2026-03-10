@@ -149,17 +149,14 @@ func (s *Service) generateNativeDiff(files []string, amend bool) (string, error)
 		return "", err
 	}
 
-	var args []string
-	if amend {
-		args = []string{"diff", "HEAD^"}
-	} else {
-		args = []string{"diff", "HEAD"}
-	}
-
 	// Filter out ignored files for native git too
 	var filteredFiles []string
 	for _, f := range files {
-		rel, err := filepath.Rel(root, f)
+		abs, err := filepath.Abs(f)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(root, abs)
 		if err == nil && !ignoredFiles[filepath.Base(rel)] {
 			filteredFiles = append(filteredFiles, rel)
 		}
@@ -169,17 +166,59 @@ func (s *Service) generateNativeDiff(files []string, amend bool) (string, error)
 		return "", nil
 	}
 
-	args = append(args, "--")
-	args = append(args, filteredFiles...)
-
-	cmd := exec.Command("git", args...)
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git diff failed: %w", err)
+	// Find untracked files first
+	lsCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard", "--")
+	lsCmd.Dir = root
+	lsOut, _ := lsCmd.Output()
+	untrackedSet := make(map[string]bool)
+	for _, line := range strings.Split(strings.TrimSpace(string(lsOut)), "\n") {
+		if line != "" {
+			untrackedSet[line] = true
+		}
 	}
 
-	return string(out), nil
+	// Split into tracked and untracked
+	var tracked, untracked []string
+	for _, f := range filteredFiles {
+		if untrackedSet[f] {
+			untracked = append(untracked, f)
+		} else {
+			tracked = append(tracked, f)
+		}
+	}
+
+	var result strings.Builder
+
+	// Diff tracked files against HEAD
+	if len(tracked) > 0 {
+		var args []string
+		if amend {
+			args = []string{"diff", "HEAD^"}
+		} else {
+			args = []string{"diff", "HEAD"}
+		}
+		args = append(args, "--")
+		args = append(args, tracked...)
+
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("git diff failed: %w", err)
+		}
+		result.Write(out)
+	}
+
+	// Generate diffs for untracked (new) files
+	for _, f := range untracked {
+		content, err := os.ReadFile(filepath.Join(root, f))
+		if err != nil {
+			continue
+		}
+		result.WriteString(generateDiffString(f, "", string(content), true, false))
+	}
+
+	return result.String(), nil
 }
 
 func (s *Service) GetFilesInLastCommit() ([]string, error) {

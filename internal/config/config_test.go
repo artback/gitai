@@ -1,12 +1,22 @@
 package config
 
 import (
+	"os"
 	"testing"
 
 	"github.com/spf13/viper"
 )
 
 func TestLoadConfig_Defaults(t *testing.T) {
+	// Use a temp dir with no config files so we only test defaults
+	tmpDir, err := os.MkdirTemp("", "gitai-config-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	t.Setenv("HOME", tmpDir)
+
 	v := viper.New()
 	cfg, err := LoadConfig(v)
 	if err != nil {
