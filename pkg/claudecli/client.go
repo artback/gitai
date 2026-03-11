@@ -10,7 +10,7 @@ import (
 
 const (
 	ClaudeCommand  = "claude"
-	DefaultTimeout = 60 * time.Second
+	DefaultTimeout = 120 * time.Second
 	DefaultModel   = "sonnet"
 )
 
@@ -51,7 +51,12 @@ func NewClientWithConfig(config Config) *Client {
 
 // Execute runs the claude CLI with the given prompt in print mode.
 func (c *Client) Execute(prompt string) (string, error) {
-	if prompt == "" {
+	return c.ExecuteWithSystemPrompt("", prompt)
+}
+
+// ExecuteWithSystemPrompt runs the claude CLI with separate system and user prompts in print mode.
+func (c *Client) ExecuteWithSystemPrompt(systemPrompt, userPrompt string) (string, error) {
+	if userPrompt == "" {
 		return "", fmt.Errorf("prompt cannot be empty")
 	}
 
@@ -60,7 +65,16 @@ func (c *Client) Execute(prompt string) (string, error) {
 		return "", fmt.Errorf("claude command not found: %w", err)
 	}
 
-	args := []string{"-p", prompt, "--model", c.model, "--output-format", "text"}
+	args := []string{
+		"-p", userPrompt,
+		"--model", c.model,
+		"--output-format", "text",
+		"--max-turns", "1",
+		"--allowedTools", "[]",
+	}
+	if systemPrompt != "" {
+		args = append(args, "--system-prompt", systemPrompt)
+	}
 	cmd := exec.Command(claudePath, args...)
 
 	var stdout, stderr bytes.Buffer
